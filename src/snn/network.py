@@ -1,0 +1,652 @@
+# General Imports
+from types import SimpleNamespace
+from functools import reduce
+import networkx as nx
+import re
+
+# Package Imports
+from .core import Population, Projection, Port, Pack, Link
+
+# Turns a non-existing path to a string
+class TempPath:
+    def __init__(self, net, root, path):
+        self.net = net
+        self.root = root
+        self.path = path
+
+    def __str__(self):
+        return self.path + ' (temp)'
+    
+    def __getattr__(self, key):
+        return TempPath(self.net, self.root, '.'.join((self.path, key)))
+        
+    def __getitem__(self, item):
+        return TempPath(self.net, self.root, f"{self.path}[{item}]")
+
+    def __dir__(self):
+        net_dir = []
+        # getting dir hints for tab completion (kinda cursed)
+        if isinstance(self.net, Network):
+            net_path = reduce(self.net.access, self.net.expand_path(self.path), self.net)
+            net_dir += list(vars(net_path).keys())
+            if isinstance(net_path, Network):
+                net_dir += (list(vars(net_path._topology).keys())
+                            + list(net_path._children.keys())
+                            + list(net_path._emptylists.keys()))
+        return super().__dir__() + net_dir
+
+# Directory structure of network topology
+class Topology(SimpleNamespace):
+    # Not really used anymore
+    @staticmethod
+    def map_entry(entry):
+        if isinstance(entry, dict):
+            return Topology(**entry)
+        return entry
+
+    # Traverse the path tree
+    @staticmethod
+    def access(root, name):
+        if root is None:
+            return
+        elif isinstance(root, TempPath):
+            print(f"path not found: {root.path}")
+        elif isinstance(name, str):
+            return getattr(root, name)
+        elif isinstance(name, int):
+            return root[name]
+        else:
+            print('error')
+            
+    # Traverse the path tree (for pack nodes)
+    @staticmethod
+    def access_node(root, name):
+        if root is None:
+            return
+        elif isinstance(root, TempPath):
+            print(f"path to node not found: {root.path}")
+        elif isinstance(root, Port):
+            if isinstance(name, str):
+                return getattr(root.link, name)
+            elif isinstance(name, int):
+                return root.link[name]
+            else:
+                print('error')
+        elif isinstance(name, str):
+            return getattr(root, name)
+        elif isinstance(name, int):
+            return root[name]
+        else:
+            print('error')
+    
+    # Convert path string to list of attributes and indexes
+    @staticmethod
+    def expand_path(path):
+        def find_num(string):
+            start = string.find('[')
+            if start == -1:
+                return string, []
+            numbers = re.findall(r"\[(\d+)]", string)
+            return string[:start], [int(num) for num in numbers]
+            
+        expanded = []
+        paths = path.split('.')
+        for p in paths:
+            string, nums = find_num(p)
+            expanded.append(string)
+            for num in nums:
+                expanded.append(num)
+        return expanded
+
+    def __init__(self, net=None, **kwargs):
+        super().__init__(**kwargs)
+        for key, value in kwargs.items():
+            if type(value) == dict:
+                setattr(self, key, Topology(**value))
+            elif type(value) == list:
+                setattr(self, key, list(map(self.map_entry, value)))
+        # link back to parent network if provided
+        if isinstance(net, Network):
+            self._network = net
+        else:
+            self._network = None
+        # unnamed projections
+        self.projections = list()
+
+    # Temporary path if object doesn't exist
+    def __getattr__(self, key):
+        return TempPath(self._network, self, key)
+    
+    def __str__(self):
+        def format_paths(top):
+            paths = []
+            for key, value in vars(top).items():
+                if key.startswith('_'):
+                    continue
+                if isinstance(value, Topology):
+                    paths.append(format_paths(value))
+                elif isinstance(value, (Population, Projection, Port, Pack)):
+                    paths.append(f"{value}")
+                elif isinstance(value, list):
+                    for i, item in enumerate(value):
+                        if isinstance(item, Topology):
+                            paths.append(format_paths(item))
+                        elif isinstance(item, (Population, Projection, Port, Pack)):
+                            paths.append(f"{item}")
+                        else:
+                            paths.append(f"{key}[{i}] is pathless")
+                else:
+                    paths.append(f"{key} is pathless")
+            return '\n'.join(paths)
+            
+        return format_paths(self)
+
+    # Add new entries
+    def add(self, **kwargs):
+        for key, value in kwargs.items():
+            if type(value) == dict:
+                setattr(self, key, Topology(**value))
+            elif type(value) == list:
+                setattr(self, key, list(map(self.map_entry, value)))
+            else:
+                setattr(self, key, value)
+    
+    # Generate path structure (after built)
+    def flatten_paths(self):
+        def _flatten_populations(top, parent_path=''):
+            for key, value in vars(top).items():
+                if key.startswith('_'):
+                    continue
+                current_path = f"{parent_path}.{key}" if parent_path else key
+                # If the value is another topwork, recurse
+                if isinstance(value, Topology):
+                    _flatten_populations(value, current_path)
+                # Set path for populations
+                elif isinstance(value, (Population, Port)):
+                    value.set_path(current_path)
+                elif isinstance(value, (Pack, Projection)):
+                    pass
+                # If the value is a list, loop through 
+                elif isinstance(value, list):
+                    for i, item in enumerate(value):
+                        list_path = f"{current_path}[{i}]"
+                        if isinstance(item, Topology):
+                            _flatten_populations(item, list_path)
+                        elif isinstance(item, (Population, Port)):
+                            item.set_path(list_path)
+                        elif isinstance(item, (Pack, Projection)):
+                            pass
+                        else:
+                            print(f"error at {list_path}: cannot set path for {item}")
+                else:
+                    print(f"error at {current_path}: cannot set path for {value}")
+        def _flatten_packs(top, parent_path=''):
+            for key, value in vars(top).items():
+                if key.startswith('_'):
+                    continue
+                current_path = f"{parent_path}.{key}" if parent_path else key
+                # If the value is another topwork, recurse
+                if isinstance(value, Topology):
+                    _flatten_packs(value, current_path)
+                # If the value is a projection, replace any temp paths
+                elif isinstance(value, Pack):
+                    for i, item in enumerate(value):
+                        if isinstance(item, TempPath):
+                            node = reduce(top.access_node, top.expand_path(item.path), top)
+                            if isinstance(node, TempPath):
+                                print(f"error at {current_path}: {node.path} does not exist")
+                            else:
+                                value[i] = node
+                        elif isinstance(item, Link):
+                            if isinstance(item.link, TempPath):
+                                # top level search
+                                node = reduce(self.access_node, self.expand_path(item.link.path), self)
+                                if isinstance(node, TempPath):
+                                    print(f"error at {current_path}: {node.path} does not exist")
+                                else:
+                                    value[i] = node
+                            else:
+                                value[i] = item.link
+                    value.set_path(current_path)
+                elif isinstance(value, (Population, Port, Projection)):
+                    pass
+                # If the value is a list, loop through 
+                elif isinstance(value, list):
+                    for i, item in enumerate(value):
+                        list_path = f"{current_path}[{i}]"
+                        if isinstance(item, Topology):
+                            _flatten_packs(item, list_path)
+                        elif isinstance(item, Pack):
+                            for e, entry in enumerate(item):
+                                if isinstance(entry, TempPath):
+                                    node = reduce(top.access_node, top.expand_path(entry.path), top)
+                                    if isinstance(node, TempPath):
+                                        print(f"error at {list_path}: {node.path} does not exist")
+                                    else:
+                                        item[e] = node
+                                elif isinstance(entry, Link):
+                                    if isinstance(entry.link, TempPath):
+                                        # top level search
+                                        node = reduce(self.access_node, self.expand_path(entry.link.path), self)
+                                        if isinstance(node, TempPath):
+                                            print(f"error at {list_path}: {node.path} does not exist")
+                                        else:
+                                            item[e] = node
+                                    else:
+                                        item[e] = entry.link
+                            item.set_path(list_path)
+                        elif isinstance(item, (Population, Port, Projection)):
+                            pass
+                        else:
+                            print(f"error at {list_path}: cannot set path for {item}")
+                else:
+                    print(f"error at {current_path}: cannot set path for {value}")
+        def _flatten_projections(top, parent_path=''):
+            for key, value in vars(top).items():
+                if key.startswith('_'):
+                    continue
+                current_path = f"{parent_path}.{key}" if parent_path else key
+                # If the value is another topwork, recurse
+                if isinstance(value, Topology):
+                    _flatten_projections(value, current_path)
+                # If the value is a projection, replace any temp paths
+                elif isinstance(value, Projection):
+                    if isinstance(value.source, TempPath):
+                        value.source = reduce(top.access, top.expand_path(value.source.path), top)
+                        if isinstance(value.source, TempPath):
+                            print(f"error at {current_path}: {value.source.path} does not exist")
+                    if isinstance(value.target, TempPath):
+                        value.target = reduce(top.access, top.expand_path(value.target.path), top)
+                        if isinstance(value.target, TempPath):
+                            print(f"error at {current_path}: {value.target.path} does not exist")
+                    value.set_path(current_path)
+                elif isinstance(value, (Population, Port, Pack)):
+                    pass
+                # If the value is a list, loop through 
+                elif isinstance(value, list):
+                    for i, item in enumerate(value):
+                        list_path = f"{current_path}[{i}]"
+                        if isinstance(item, Topology):
+                            _flatten_projections(item, list_path)
+                        elif isinstance(item, Projection):
+                            if isinstance(item.source, TempPath):
+                                item.source = reduce(top.access, top.expand_path(item.source.path), top)
+                                if isinstance(item.source, TempPath):
+                                    print(f"error at {list_path}: {item.source.path} does not exist")
+                            if isinstance(item.target, TempPath):
+                                item.target = reduce(top.access, top.expand_path(item.target.path), top)
+                                if isinstance(item.target, TempPath):
+                                    print(f"error at {list_path}: {item.target.path} does not exist")
+                            item.set_path(list_path)
+                        elif isinstance(item, (Population, Port, Pack)):
+                            pass
+                        else:
+                            print(f"error at {list_path}: cannot set path for {item}")
+                else:
+                    print(f"error at {current_path}: cannot set path for {value}")
+        # Flattening order is important for resolution
+        _flatten_populations(self) # first for populations
+        _flatten_packs(self)       # then for packs
+        _flatten_projections(self) # finally for projections
+        
+    # Connect network elements
+    def connect(self, source, target, model=None, edges=None):
+        # Convert any temporary paths to source/target object references
+        if isinstance(source, TempPath):
+            source = reduce(self.access, self.expand_path(source.path), self)
+            if isinstance(source, TempPath):
+                print(f"connection error: {source.path} does not exist")
+        if isinstance(target, TempPath):
+            target = reduce(self.access, self.expand_path(target.path), self)
+            if isinstance(target, TempPath):
+                print(f"connection error: {target.path} does not exist")
+        # Link ports with object references
+        if isinstance(source, Port):
+            print('linking port as source')
+            if (len(source) != len(target)):
+                print(f"warning: port size mismatch {len(source)} <- {len(target)}")
+            source.set_link(target) # by reference
+        if isinstance(target, Port):
+            print('linking port as target')
+            if (len(source) != len(target)):
+                print(f"warning: port size mismatch {len(source)} -> {len(target)}")
+            target.set_link(source) # by reference
+        # Connect populations and packs with projections
+        if (isinstance(source, (Population, Pack)) and
+            isinstance(target, (Population, Pack))):
+            #print('adding unnamed projection')
+            self.projections.append(Projection(source, target, model, edges))
+        # Connecting individual nodes?
+        # Connecting multiple projections?
+
+    # Generate a networkx graph
+    def to_nx(self):
+        def flatten_data(data):
+            flat_data = dict()
+            for key, value in data.items():
+                if hasattr(value, 'base'):
+                    # element of numpy array (could be more error checking)
+                    flat_data[key] = value[0]
+                else:
+                    flat_data[key] = value
+            return flat_data
+
+        def populate(top, graph):
+            for key, value in vars(top).items():
+                if key.startswith('_'):
+                    continue
+                if isinstance(value, Topology):
+                    populate(value, graph)
+                elif isinstance(value, Population):
+                    for node in value:
+                        graph.add_node(node.name, **flatten_data(node.data))
+                elif isinstance(value, Projection):
+                    for edge in value:
+                        graph.add_edge(edge.source_name, edge.target_name, **flatten_data(edge.data))
+                elif isinstance(value, list):
+                    for i, item in enumerate(value):
+                        if isinstance(item, Topology):
+                            populate(item, graph)
+                        elif isinstance(item, Population):
+                            for node in item:
+                                graph.add_node(node.name, **flatten_data(node.data))
+                        elif isinstance(item, Projection):
+                            for edge in item:
+                                graph.add_edge(edge.source_name, edge.target_name, **flatten_data(edge.data))
+
+        # launch the recursive build
+        graph = nx.DiGraph()
+        populate(self, graph)
+        return graph
+
+# Wrapper around Topology
+# Built hierarchically around dependencies
+class Network:
+    def __init__(self, parent=None):
+        self._topology = Topology(self)
+        self._built = False
+        self._graph = None
+        # Scaffolding
+        self._parent = parent
+        self._children = dict()
+        self._connections = dict()
+        self._dependencies = dict()
+        self._emptylists = dict()
+
+    # Special attribute assignments
+    def __setattr__(self, name, value):
+        if name.startswith('_'): # special attributes
+            super().__setattr__(name, value)
+        elif isinstance(value, Port):
+            # add dependency for ports
+            self._dependencies[name] = value
+            self.add(name, value)
+        elif isinstance(value, (Network, Population, Projection, Pack)):
+            self.add(name, value)
+        elif type(value) is list:
+            # stash empty lists for later
+            # we expect these to be generated procedurally
+            if not value:
+                print(f"warning: adding an empty list {name}")
+                self._emptylists[name] = value
+            # all items in list should be the same type
+            elif isinstance(value[0], Port):
+                self._dependencies[name] = value
+                self.add(name, value)
+            elif isinstance(value[0], (Network, Population, Projection, Pack)):
+                self.add(name, value)
+            else:
+                # regular attributes
+                super().__setattr__(name, value)
+        else:
+            # regular attributes
+            super().__setattr__(name, value)
+
+    # Expose the underlying Topology
+    def __getattr__(self, name):
+        if name in self._emptylists:
+            return self._emptylists[name]
+        else:
+            return getattr(self._topology, name)
+    
+    def __dir__(self):
+        return (super().__dir__()
+                + list(vars(self._topology).keys())
+                + list(self._children.keys())
+                + list(self._emptylists.keys()))
+
+    def __str__(self):
+        return str(self._topology)
+
+    # Adding network elements
+    def add(self, name, value):
+        # stash networks for future processing
+        if isinstance(value, Network):
+            print('info: adding network')
+            self._children[name] = value
+            value._parent = self
+        # also stash lists of networks
+        elif (type(value) is list):
+            if isinstance(value[0], Network):
+                if not all(isinstance(item, Network) for item in value):
+                    print(f"error adding {name} list: not all elements are networks")
+                print('info: adding list of networks')
+                self._children[name] = value
+                for item in value:
+                    item._parent = self
+            else:
+                setattr(self._topology, name, value)
+        else:
+            setattr(self._topology, name, value)
+
+    # Adding connections (links, unnamed projections)
+    def connect(self, source, target, model=None, edges=None):
+        # stash connections for future processing
+        key = str(len(self._connections))
+        self._connections[key] = (source, target, model, edges)
+    
+    # Traverse the path tree
+    @staticmethod
+    def access(root, name):
+        if root is None:
+            return
+        elif isinstance(root, TempPath):
+            print(f"path not found: {root.path}")
+        # initialized, but unbuilt networks
+        elif isinstance(root, Network):
+            try:
+                return root._children[name]
+            except KeyError:
+                if isinstance(name, str):
+                    return getattr(root, name)
+                elif isinstance(name, int):
+                    return root[name]
+                else:
+                    print('error')
+        elif isinstance(name, str):
+            return getattr(root, name)
+        elif isinstance(name, int):
+            return root[name]
+        else:
+            print('error')
+    
+    # Convert path string to list of attributes and indexes
+    @staticmethod
+    def expand_path(path):
+        def find_num(string):
+            start = string.find('[')
+            if start == -1:
+                return string, []
+            numbers = re.findall(r"\[(\d+)]", string)
+            return string[:start], [int(num) for num in numbers]
+            
+        expanded = []
+        paths = path.split('.')
+        for p in paths:
+            string, nums = find_num(p)
+            expanded.append(string)
+            for num in nums:
+                expanded.append(num)
+        return expanded
+    
+    # Incrementally and recursively build children, add connections, resolve dependencies
+    def build(self):
+        # Go through any previously uninitialized lists
+        for name, value in self._emptylists.items():
+            if not value:
+                print(f"warning: setting an empty list {name}")
+                super().__setattr__(name, value)
+            # all items in list should be the same type
+            elif isinstance(value[0], Port):
+                self._dependencies[name] = value
+                self.add(name, value)
+            elif isinstance(value[0], (Network, Population, Projection, Pack)):
+                self.add(name, value)
+            else:
+                # regular attributes
+                super().__setattr__(name, value)
+
+        # Main build process
+        # Basically a topological sort at each network level
+        still_building = True
+        children_count = len(self._children)
+        build_loops = 0
+        max_build_loops = 3
+        while (still_building):
+            # Build any bricks (hierarchically, and if dependencies met)
+            children = []
+            for key, value in self._children.items():
+                if type(value) is list:
+                    # assumes that all dependencies for a list of networks
+                    # can be satisfied before building
+                    if not any(item._dependencies for item in value):
+                        net_list = []
+                        for i, item in enumerate(value):
+                            print(f"info: building {key}[{i}]")
+                            item.build()
+                            item._built = True
+                            net_list.append(item._topology)
+                        setattr(self._topology, key, net_list)
+                        children.append(key)
+                else:
+                    if not value._dependencies:
+                        print(f"info: building {key}")
+                        value.build()
+                        value._built = True
+                        setattr(self._topology, key, value._topology)
+                        children.append(key)
+            # cleanup any built networks from list
+            for child in children:
+                del self._children[child]
+            #print(f"debug: children remaining: {len(self._children)}")
+            
+            # Add any connections
+            connections = []
+            for key, (source, target, model, edges) in self._connections.items():
+                # try to resolve any temporary paths
+                if isinstance(source, TempPath):
+                    source = reduce(self.access, self.expand_path(source.path), self)
+                    if isinstance(source, TempPath):
+                        print(f"info: connection path {source.path} does not exist (yet)")
+                if isinstance(target, TempPath):
+                    target = reduce(self.access, self.expand_path(target.path), self)
+                    if isinstance(target, TempPath):
+                        print(f"info: connection path {target.path} does not exist (yet)")
+                # connect ports (bypass topology methods)
+                if (isinstance(source, Port) and
+                    not isinstance(target, TempPath)):
+                    print('info: linking port as source')
+                    if source.link is None:
+                        source.set_link(target)
+                    else:
+                        print(f"error linking {source}: already linked")
+                    if source.size is None:
+                        source.set_size(target.size)
+                    elif (len(source) != len(target)):
+                        print(f"warning: port size mismatch {len(source)} <- {len(target)}")
+                        source.set_size(target.size)
+                    connections.append(key)
+                if (isinstance(target, Port) and
+                    not isinstance(source, TempPath)):
+                    print('info: linking port as target')
+                    if target.link is None:
+                        target.set_link(source)
+                    else:
+                        print(f"error linking {target}: already linked")
+                    if target.size is None:
+                        target.set_size(source.size)
+                    elif (len(source) != len(target)):
+                        print(f"warning: port size mismatch {len(source)} -> {len(target)}")
+                        target.set_size(source.size)
+                    connections.append(key)
+                # connect unnamed projections
+                if (isinstance(source, (Population, Pack)) and
+                    isinstance(target, (Population, Pack))):
+                    print('info: adding unnamed projection')
+                    self._topology.connect(source, target, model, edges)
+                    connections.append(key)
+            # cleanup any added connections from list
+            for conn in connections:
+                del self._connections[conn]
+            #print(f"debug: connections remaining: {len(self._connections)}")
+            # connections remaining after children are built should be 0
+            if ((not self._children) and self._connections):
+                print("error: connections remaining after children built")
+            
+            # Resolve any dependencies
+            for key, value in self._children.items():
+                if (type(value) is list):
+                    for i, item in enumerate(value):
+                        item_dep_keys = []
+                        for item_dep_key, item_dep_value in item._dependencies.items():
+                            if isinstance(item_dep_value, Port):
+                                if item_dep_value.size is not None:
+                                    print(f"info: dependency resolved for {item_dep_key}")
+                                    item_dep_keys.append(item_dep_key)
+                            elif type(item_dep_value) is list:
+                                if all(item_dep_item.size is not None for item_dep_item in item_dep_value):
+                                    print(f"info: dependency resolved for {item_dep_key}")
+                                    item_dep_keys.append(item_dep_key)
+                            else:
+                                print(f"error: dependency value at {item_dep_value}")
+                        for item_dep_key in item_dep_keys:
+                            del item._dependencies[item_dep_key]
+                else:
+                    dep_keys = []
+                    for dep_key, dep_value in value._dependencies.items():
+                        if isinstance(dep_value, Port):
+                            if dep_value.size is not None:
+                                print(f"info: dependency resolved for {dep_key}")
+                                dep_keys.append(dep_key)
+                        elif type(dep_value) is list:
+                            if all(dep_item.size is not None for dep_item in dep_value):
+                                print(f"info: dependency resolved for {dep_key}")
+                                dep_keys.append(dep_key)
+                        else:
+                            print(f"error: dependency value at {dep_value}")
+                    for dep_key in dep_keys:
+                        del value._dependencies[dep_key]
+                        
+            # Check if done building
+            if not self._children:
+                still_building = False
+            elif len(self._children) < children_count:
+                children_count = len(self._children)
+                # reset loop counter
+                build_loops = 0
+            else:
+                build_loops += 1
+                if build_loops >= max_build_loops:
+                    print("error: unable to resolve dependencies")
+                    # exit out of potentially infinite loop
+                    still_building = False
+        
+        # Flatten networks at top level
+        if (self._parent is None):
+            print('info: flattening network topology')
+            self._topology.flatten_paths()
+            # should this be generated by default?
+            self._graph = self._topology.to_nx()
+
+        self._built = True
+        return
