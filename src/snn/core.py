@@ -155,7 +155,12 @@ class Population(list):
         
         # instantiate neuron data
         for key, value in vars(self.neuron).items():
-            if isinstance(value, (int, float)):
+            if isinstance(value, (str, tuple)): # shared params
+                self.__dict__[key] = np.empty(1,dtype=object)
+                self.__dict__[key][0] = value
+                for item in self:
+                    item.data[key] = getattr(self, key)[0:1]
+            elif isinstance(value, (int, float)):
                 # set key directly due to overloaded __setattr__
                 self.__dict__[key] = np.full((len(self)),value)
                 for i, item in enumerate(self):
@@ -171,9 +176,11 @@ class Population(list):
     def set_values(self, **kwargs):
         for key, value in kwargs.items():
             if key in vars(self.neuron).keys():
-                if hasattr(value, '__len__'):
+                if isinstance(value, (str, tuple)):
+                    getattr(self, key)[0] = value
+                elif hasattr(value, '__len__'):
                     if len(value) != len(getattr(self, key)):
-                        print(f"error: size mismatch for {key}")
+                        print(f"error: size mismatch for {key}, required {len(getattr(self, key))}, got {len(value)}")
                     else:
                         for i, item in enumerate(value):
                             getattr(self, key)[i] = item
@@ -296,7 +303,12 @@ class Projection(list):
             
         # instantiate synapse data
         for key, value in vars(self.synapse).items():
-            if isinstance(value, (int, float)):
+            if isinstance(value, (str, tuple)): # shared params
+                self.__dict__[key] = np.empty(1,dtype=object)
+                self.__dict__[key][0] = value
+                for item in self:
+                    item.data[key] = getattr(self, key)[0:1]
+            elif isinstance(value, (int, float)):
                 # set key directly due to overloaded __setattr__
                 self.__dict__[key] = np.full((len(self)),value)
                 for i, item in enumerate(self):
@@ -312,9 +324,11 @@ class Projection(list):
     def set_values(self, **kwargs):
         for key, value in kwargs.items():
             if key in vars(self.synapse).keys():
-                if hasattr(value, '__len__'):
+                if isinstance(value, (str, tuple)):
+                    getattr(self, key)[0] = value
+                elif hasattr(value, '__len__'):
                     if len(value) != len(getattr(self, key)):
-                        print(f"error: size mismatch for {key}")
+                        print(f"error: size mismatch for {key}, required {len(getattr(self, key))}, got {len(value)}")
                     else:
                         for i, item in enumerate(value):
                             getattr(self, key)[i] = item
