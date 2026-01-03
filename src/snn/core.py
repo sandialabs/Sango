@@ -18,7 +18,11 @@ class Node:
         if name in self.data:
             if hasattr(self.data[name], 'base'):
                 # element of numpy array (could be more error checking)
-                return self.data[name][0]
+                if (isinstance(self.data[name][0], tuple) and
+                    len(self.data[name][0]) == 1):
+                    return self.data[name][0][0]
+                else:
+                    return self.data[name][0]
             else:
                 return self.data[name]
         else:
@@ -58,7 +62,11 @@ class Edge:
         if name in self.data:
             if hasattr(self.data[name], 'base'):
                 # element of numpy array
-                return self.data[name][0]
+                if (isinstance(self.data[name][0], tuple) and
+                    len(self.data[name][0]) == 1):
+                    return self.data[name][0][0]
+                else:
+                    return self.data[name][0]
             else:
                 return self.data[name]
         else:
@@ -178,6 +186,9 @@ class Population(list):
             if key in vars(self.neuron).keys():
                 if isinstance(value, (str, tuple)):
                     getattr(self, key)[0] = value
+                elif (isinstance(value, (int, float)) and
+                      isinstance(getattr(self, key)[0], tuple)):
+                    getattr(self, key)[0] = (value,) # keep it as tuple
                 elif hasattr(value, '__len__'):
                     if len(value) != len(getattr(self, key)):
                         print(f"error: size mismatch for {key}, required {len(getattr(self, key))}, got {len(value)}")
@@ -326,6 +337,9 @@ class Projection(list):
             if key in vars(self.synapse).keys():
                 if isinstance(value, (str, tuple)):
                     getattr(self, key)[0] = value
+                elif (isinstance(value, (int, float)) and
+                      isinstance(getattr(self, key)[0], tuple)):
+                    getattr(self, key)[0] = (value,) # keep it as tuple
                 elif hasattr(value, '__len__'):
                     if len(value) != len(getattr(self, key)):
                         print(f"error: size mismatch for {key}, required {len(getattr(self, key))}, got {len(value)}")
