@@ -367,6 +367,7 @@ class Network:
         self._connections = dict()
         self._dependencies = dict()
         self._emptylists = dict()
+        self._netlists = dict()
 
     # Special attribute assignments
     def __setattr__(self, name, value):
@@ -427,6 +428,9 @@ class Network:
                     print(f"error adding {name} list: not all elements are networks")
                 print('info: adding list of networks')
                 self._children[name] = value
+                # placeholder paths for network lists
+                self._netlists[name] = [TempPath(self, self._topology, f"{name}[{i}]")
+                                        for i in range(len(value))]
                 for item in value:
                     item._parent = self
             else:
@@ -501,6 +505,10 @@ class Network:
                 # regular attributes
                 super().__setattr__(name, value)
 
+        # Add any placeholder netlists to the topology
+        for name, value in self._netlists.items():
+            setattr(self._topology, name, value)
+
         # Main build process
         # Basically a topological sort at each network level
         still_building = True
@@ -512,16 +520,18 @@ class Network:
             children = []
             for key, value in self._children.items():
                 if type(value) is list:
-                    # assumes that all dependencies for a list of networks
-                    # can be satisfied before building
-                    if not any(item._dependencies for item in value):
-                        net_list = []
-                        for i, item in enumerate(value):
+                    for i, item in enumerate(value):
+                        # build any item that can be built (that hasn't already been built)
+                        if not item._dependencies and item._built == False:
                             print(f"info: building {key}[{i}]")
                             item.build()
                             item._built = True
-                            net_list.append(item._topology)
-                        setattr(self._topology, key, net_list)
+                            # update the placeholder list item
+                            getattr(self._topology, key)[i] = item._topology
+                            # reset build loop counter
+                            build_loops = 0
+                    # add the list if everything built (all dependencies met)
+                    if not any(item._dependencies for item in value):
                         children.append(key)
                 else:
                     if not value._dependencies:
