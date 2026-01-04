@@ -301,11 +301,6 @@ class Topology(SimpleNamespace):
             if isinstance(target, TempPath):
                 print(f"connection error: {target.path} does not exist")
         # Link ports with object references
-        if isinstance(source, Port):
-            print('linking port as source')
-            if (len(source) != len(target)):
-                print(f"warning: port size mismatch {len(source)} <- {len(target)}")
-            source.set_link(target) # by reference
         if isinstance(target, Port):
             print('linking port as target')
             if (len(source) != len(target)):
@@ -553,31 +548,17 @@ class Network:
                     if isinstance(target, TempPath):
                         print(f"info: connection path {target.path} does not exist (yet)")
                 # connect ports (bypass topology methods)
-                if (isinstance(source, Port) and
-                    not isinstance(target, TempPath)):
-                    print('info: linking port as source')
-                    if source.link is None:
-                        source.set_link(target)
-                    else:
-                        print(f"error linking {source}: already linked")
-                    if source.size is None:
-                        source.set_size(target.size)
-                    elif (len(source) != len(target)):
-                        print(f"warning: port size mismatch {len(source)} <- {len(target)}")
-                        source.set_size(target.size)
-                    connections.append(key)
                 if (isinstance(target, Port) and
                     not isinstance(source, TempPath)):
                     print('info: linking port as target')
+                    if target.size is None:
+                        target.set_size(source.size)
+                    elif (len(source) != len(target)):
+                        print(f"error linking {target}: port size mismatch {len(source)} -> {len(target)}")
                     if target.link is None:
                         target.set_link(source)
                     else:
                         print(f"error linking {target}: already linked")
-                    if target.size is None:
-                        target.set_size(source.size)
-                    elif (len(source) != len(target)):
-                        print(f"warning: port size mismatch {len(source)} -> {len(target)}")
-                        target.set_size(source.size)
                     connections.append(key)
                 # connect unnamed projections
                 if (isinstance(source, (Population, Pack)) and

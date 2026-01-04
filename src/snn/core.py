@@ -403,8 +403,8 @@ class Port(list):
         
     def set_link(self, link):
         self.link = link
-        for i in range(len(self)):
-            self[i].link = self.link[i]
+        for i, item in enumerate(self):
+            item.link = self.link[i]
 
 # Outputs
 class Pack(list):
