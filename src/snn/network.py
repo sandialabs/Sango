@@ -1,6 +1,6 @@
 # General Imports
 from types import SimpleNamespace
-from functools import reduce
+from functools import reduce, wraps
 import networkx as nx
 import re
 
@@ -398,6 +398,23 @@ class Network:
             # regular attributes
             super().__setattr__(name, value)
 
+    # Automatically call recursive build
+    @classmethod
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # wrap the 'build' method
+        sub_build = cls.build
+
+        @wraps(sub_build)
+        def recursive_build(self, *args, **kwargs_):
+            # run subclass build first
+            sub_build(self, *args, **kwargs_)
+            # base class recursive build
+            self._build()
+            return
+
+        cls.build = recursive_build
+
     # Expose the underlying Topology
     def __getattr__(self, name):
         if name in self._emptylists:
@@ -478,7 +495,7 @@ class Network:
                 return string, []
             numbers = re.findall(r"\[(\d+)]", string)
             return string[:start], [int(num) for num in numbers]
-            
+
         expanded = []
         paths = path.split('.')
         for p in paths:
@@ -487,9 +504,13 @@ class Network:
             for num in nums:
                 expanded.append(num)
         return expanded
-    
-    # Incrementally and recursively build children, add connections, resolve dependencies
+
+    # Passthrough method for build
     def build(self):
+        self._build()
+
+    # Incrementally and recursively build children, add connections, resolve dependencies
+    def _build(self):
         # Go through any previously uninitialized lists
         for name, value in self._emptylists.items():
             if not value:
