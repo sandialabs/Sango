@@ -156,10 +156,10 @@ class NodeGroup(list):
 
     def set_size(self, size):
         # node list
-        if size is not None:
-            super().__init__([Node(i) for i in range(size)])
+        if size is None:
+            super().__init__([Node(0)]) # default node
         else:
-            super().__init__()
+            super().__init__([Node(i) for i in range(size)])
         
         # instantiate model data
         for key, value in vars(self.nodemodel).items():
