@@ -461,6 +461,19 @@ class Network:
         # stash connections for future processing
         key = str(len(self._connections))
         self._connections[key] = (source, target, model, edges)
+
+    # Manually setting port sizes (for breaking dependency chains)
+    def set_portsize(self, port, size):
+        if isinstance(port, TempPath):
+            port = reduce(self.access, self.expand_path(port.path), self)
+        if isinstance(port, TempPath):
+            print(f"error: {port.path} does not exist")
+            return
+        if isinstance(port, NodePort):
+            port.set_size(size)
+        else:
+            print(f"error: {port} is not a nodeport")
+        return
     
     # Traverse the path tree
     @staticmethod
