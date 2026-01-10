@@ -375,7 +375,8 @@ class Network:
             super().__setattr__(name, value)
         elif isinstance(value, NodePort):
             # add dependency for ports
-            self._dependencies[name] = value
+            if value.size is None:
+                self._dependencies[name] = value
             self.add(name, value)
         elif isinstance(value, (Network, NodeGroup, EdgeGroup, NodeList)):
             self.add(name, value)
