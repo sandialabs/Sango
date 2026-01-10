@@ -1,2 +1,2 @@
-from .core import Population, Projection, Port, Pack
+from .core import NodeGroup, EdgeGroup, NodePort, NodeList
 from .network import Network

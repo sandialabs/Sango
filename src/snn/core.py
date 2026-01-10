@@ -2,7 +2,7 @@
 import numpy as np
 
 # Package Imports
-from .model import Neuron, Synapse
+from .model import NodeModel, EdgeModel
 
 # Base classes
 class Node:
@@ -105,13 +105,13 @@ class Link:
         else:
             return f"{self.link}"
 
-# Neurons
-class Population(list):
+# Group of instantiated nodes sharing the same model (e.g. Neurons)
+class NodeGroup(list):
     def __init__(self, model, size=None, **kwargs):
-        if isinstance(model, Neuron):
-            self.neuron = model # defaults
+        if isinstance(model, NodeModel):
+            self.nodemodel = model # defaults
         else:
-            print(f"error: {model} not Neuron class")
+            print(f"error: {model} not NodeModel class")
         self.path = None # if None, not built
         self.set_size(size)
         self.set_values(**kwargs)
@@ -120,12 +120,12 @@ class Population(list):
         if self.path is not None:
             return f"(node) {self.path}"
         else:
-            return 'detached population'
+            return 'detached nodegroup'
 
     def __setattr__(self, name, value):
-        if name in ('path', 'neuron'):
+        if name in ('path', 'nodemodel'):
             super().__setattr__(name, value)
-        elif name in vars(self.neuron).keys():
+        elif name in vars(self.nodemodel).keys():
             set_dict = {name: value}
             self.set_values(**set_dict)
         else:
@@ -138,14 +138,14 @@ class Population(list):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def __dir__(self):
-        return super().__dir__() + list(vars(self.neuron).keys()) + ['size']
+        return super().__dir__() + list(vars(self.nodemodel).keys()) + ['size']
     
     def add_node(self, **kwargs):
         # append new node to regular list
         index = len(self)
         super().append(Node(index))
         # append to numpy arrays (very slow...)
-        for key, value in vars(self.neuron).items():
+        for key, value in vars(self.nodemodel).items():
             if key in kwargs:
                 self.__dict__[key] = np.append(self.__dict__[key], kwargs[key])
             else: # defaults
@@ -161,8 +161,8 @@ class Population(list):
         else:
             super().__init__()
         
-        # instantiate neuron data
-        for key, value in vars(self.neuron).items():
+        # instantiate model data
+        for key, value in vars(self.nodemodel).items():
             if isinstance(value, (str, tuple)): # shared params
                 self.__dict__[key] = np.empty(1,dtype=object)
                 self.__dict__[key][0] = value
@@ -183,7 +183,7 @@ class Population(list):
 
     def set_values(self, **kwargs):
         for key, value in kwargs.items():
-            if key in vars(self.neuron).keys():
+            if key in vars(self.nodemodel).keys():
                 if isinstance(value, (str, tuple)):
                     getattr(self, key)[0] = value
                 elif (isinstance(value, (int, float)) and
@@ -205,13 +205,13 @@ class Population(list):
         for i in range(len(self)):
             self[i].name = f'{self.path}[{i}]'
 
-# Synapses
-class Projection(list):
+# Group of instantiated edges between two sets of nodes (e.g. Synapses)
+class EdgeGroup(list):
     def __init__(self, source, target, model, edges=None, **kwargs):
-        if isinstance(model, Synapse):
-            self.synapse = model # defaults
+        if isinstance(model, EdgeModel):
+            self.edgemodel = model # defaults
         else:
-            print(f"error: {model} not Synapse class")
+            print(f"error: {model} not EdgeModel class")
         self.source = source
         self.target = target
         self.path = None
@@ -223,12 +223,12 @@ class Projection(list):
         if self.path is not None:
             return f"(edge) {self.path}: {self.source} -> {self.target}"
         else:
-            return 'detached projection'
+            return 'detached edgegroup'
     
     def __setattr__(self, name, value):
-        if name in ('path', 'synapse', 'source', 'target', 'edge_map'):
+        if name in ('path', 'edgemodel', 'source', 'target', 'edge_map'):
             super().__setattr__(name, value)
-        elif name in vars(self.synapse).keys():
+        elif name in vars(self.edgemodel).keys():
             set_dict = {name: value}
             self.set_values(**set_dict)
         else:
@@ -245,7 +245,7 @@ class Projection(list):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def __dir__(self):
-        return super().__dir__() + list(vars(self.synapse).keys()) + ['edges', 'source_index', 'target_index']
+        return super().__dir__() + list(vars(self.edgemodel).keys()) + ['edges', 'source_index', 'target_index']
 
     def __getitem__(self, key):
         if isinstance(key, (int, slice)):
@@ -290,7 +290,7 @@ class Projection(list):
         super().append(Edge(s,t))
         self.edge_map[(s,t)] = index
         # append to numpy arrays (very slow...)
-        for key, value in vars(self.synapse).items():
+        for key, value in vars(self.edgemodel).items():
             if key in kwargs:
                 self.__dict__[key] = np.append(self.__dict__[key], kwargs[key])
             else: # defaults
@@ -302,7 +302,7 @@ class Projection(list):
     def set_edges(self, edges):
         # edge list (from list of tuples)
         if edges is None:
-            super().__init__([Edge(0,0)]) # default synapse
+            super().__init__([Edge(0,0)]) # default edge
             self.edge_map[(0,0)] = 0
         else:
             super().__init__([Edge(s,t) for s,t in edges])
@@ -312,8 +312,8 @@ class Projection(list):
                     raise ValueError(f"error: edge '({s},{t})' already exists (no duplicates allowed)")
                 self.edge_map[(s,t)] = i
             
-        # instantiate synapse data
-        for key, value in vars(self.synapse).items():
+        # instantiate model data
+        for key, value in vars(self.edgemodel).items():
             if isinstance(value, (str, tuple)): # shared params
                 self.__dict__[key] = np.empty(1,dtype=object)
                 self.__dict__[key][0] = value
@@ -334,7 +334,7 @@ class Projection(list):
 
     def set_values(self, **kwargs):
         for key, value in kwargs.items():
-            if key in vars(self.synapse).keys():
+            if key in vars(self.edgemodel).keys():
                 if isinstance(value, (str, tuple)):
                     getattr(self, key)[0] = value
                 elif (isinstance(value, (int, float)) and
@@ -352,14 +352,14 @@ class Projection(list):
             
     def set_path(self, path):
         def trace(root, index):
-            if isinstance(root, Population):
+            if isinstance(root, NodeGroup):
                 return root[index].name
-            elif isinstance(root, Pack):
+            elif isinstance(root, NodeList):
                 try:
                     return root[index].name
                 except AttributeError:
                     print(f"error at {root}[{index}]")
-            elif isinstance(root, Port):
+            elif isinstance(root, NodePort):
                 return trace(root.link, index)
             else:
                 print('error')
@@ -371,8 +371,8 @@ class Projection(list):
             self[i].source_name = trace(self.source, self[i].source_index)
             self[i].target_name = trace(self.target, self[i].target_index)
 
-# Inputs
-class Port(list):
+# Alias class pointing to set of (external) nodes (e.g. Network Inputs)
+class NodePort(list):
     def __init__(self, size=None):
         if size is not None:
             super().__init__([Link(i) for i in range(size)])
@@ -386,7 +386,7 @@ class Port(list):
 
     def __str__(self):
         if self.path is None:
-            return 'detached port'
+            return 'detached nodeport'
         elif self.link is not None:
             return f"(port) {self.path} <- {self.link}"
         else:
@@ -406,8 +406,8 @@ class Port(list):
         for i, item in enumerate(self):
             item.link = self.link[i]
 
-# Outputs
-class Pack(list):
+# Alias class with a list of (pointers to) nodes (e.g. Network Outputs)
+class NodeList(list):
     def __init__(self, *args):
         super().__init__(*args)
         self.path = None
@@ -423,9 +423,9 @@ class Pack(list):
         
     def __str__(self):
         if self.path is not None:
-            return f"(pack) {self.path}"
+            return f"(list) {self.path}"
         else:
-            return 'detached pack'
+            return 'detached nodelist'
         
     def set_path(self, path):
         self.path = path

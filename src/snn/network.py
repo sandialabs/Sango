@@ -5,7 +5,7 @@ import networkx as nx
 import re
 
 # Package Imports
-from .core import Population, Projection, Port, Pack, Link
+from .core import NodeGroup, EdgeGroup, NodePort, NodeList, Link
 
 # Turns a non-existing path to a string
 class TempPath:
@@ -58,14 +58,14 @@ class Topology(SimpleNamespace):
         else:
             print('error')
             
-    # Traverse the path tree (for pack nodes)
+    # Traverse the path tree (for node lists)
     @staticmethod
     def access_node(root, name):
         if root is None:
             return
         elif isinstance(root, TempPath):
             print(f"path to node not found: {root.path}")
-        elif isinstance(root, Port):
+        elif isinstance(root, NodePort):
             if isinstance(name, str):
                 return getattr(root.link, name)
             elif isinstance(name, int):
@@ -110,8 +110,8 @@ class Topology(SimpleNamespace):
             self._network = net
         else:
             self._network = None
-        # unnamed projections
-        self.projections = list()
+        # unnamed edgegroups
+        self.edgegroups = list()
 
     # Temporary path if object doesn't exist
     def __getattr__(self, key):
@@ -125,13 +125,13 @@ class Topology(SimpleNamespace):
                     continue
                 if isinstance(value, Topology):
                     paths.append(format_paths(value))
-                elif isinstance(value, (Population, Projection, Port, Pack)):
+                elif isinstance(value, (NodeGroup, EdgeGroup, NodePort, NodeList)):
                     paths.append(f"{value}")
                 elif isinstance(value, list):
                     for i, item in enumerate(value):
                         if isinstance(item, Topology):
                             paths.append(format_paths(item))
-                        elif isinstance(item, (Population, Projection, Port, Pack)):
+                        elif isinstance(item, (NodeGroup, EdgeGroup, NodePort, NodeList)):
                             paths.append(f"{item}")
                         else:
                             paths.append(f"{key}[{i}] is pathless")
@@ -153,43 +153,43 @@ class Topology(SimpleNamespace):
     
     # Generate path structure (after built)
     def flatten_paths(self):
-        def _flatten_populations(top, parent_path=''):
+        def _flatten_nodegroups(top, parent_path=''):
             for key, value in vars(top).items():
                 if key.startswith('_'):
                     continue
                 current_path = f"{parent_path}.{key}" if parent_path else key
                 # If the value is another topwork, recurse
                 if isinstance(value, Topology):
-                    _flatten_populations(value, current_path)
-                # Set path for populations
-                elif isinstance(value, (Population, Port)):
+                    _flatten_nodegroups(value, current_path)
+                # Set path for nodegroups
+                elif isinstance(value, (NodeGroup, NodePort)):
                     value.set_path(current_path)
-                elif isinstance(value, (Pack, Projection)):
+                elif isinstance(value, (NodeList, EdgeGroup)):
                     pass
                 # If the value is a list, loop through 
                 elif isinstance(value, list):
                     for i, item in enumerate(value):
                         list_path = f"{current_path}[{i}]"
                         if isinstance(item, Topology):
-                            _flatten_populations(item, list_path)
-                        elif isinstance(item, (Population, Port)):
+                            _flatten_nodegroups(item, list_path)
+                        elif isinstance(item, (NodeGroup, NodePort)):
                             item.set_path(list_path)
-                        elif isinstance(item, (Pack, Projection)):
+                        elif isinstance(item, (NodeList, EdgeGroup)):
                             pass
                         else:
                             print(f"error at {list_path}: cannot set path for {item}")
                 else:
                     print(f"error at {current_path}: cannot set path for {value}")
-        def _flatten_packs(top, parent_path=''):
+        def _flatten_nodelists(top, parent_path=''):
             for key, value in vars(top).items():
                 if key.startswith('_'):
                     continue
                 current_path = f"{parent_path}.{key}" if parent_path else key
                 # If the value is another topwork, recurse
                 if isinstance(value, Topology):
-                    _flatten_packs(value, current_path)
-                # If the value is a projection, replace any temp paths
-                elif isinstance(value, Pack):
+                    _flatten_nodelists(value, current_path)
+                # If the value is a nodelist, replace any temp paths
+                elif isinstance(value, NodeList):
                     for i, item in enumerate(value):
                         if isinstance(item, TempPath):
                             node = reduce(top.access_node, top.expand_path(item.path), top)
@@ -208,15 +208,15 @@ class Topology(SimpleNamespace):
                             else:
                                 value[i] = item.link
                     value.set_path(current_path)
-                elif isinstance(value, (Population, Port, Projection)):
+                elif isinstance(value, (NodeGroup, NodePort, EdgeGroup)):
                     pass
                 # If the value is a list, loop through 
                 elif isinstance(value, list):
                     for i, item in enumerate(value):
                         list_path = f"{current_path}[{i}]"
                         if isinstance(item, Topology):
-                            _flatten_packs(item, list_path)
-                        elif isinstance(item, Pack):
+                            _flatten_nodelists(item, list_path)
+                        elif isinstance(item, NodeList):
                             for e, entry in enumerate(item):
                                 if isinstance(entry, TempPath):
                                     node = reduce(top.access_node, top.expand_path(entry.path), top)
@@ -235,22 +235,22 @@ class Topology(SimpleNamespace):
                                     else:
                                         item[e] = entry.link
                             item.set_path(list_path)
-                        elif isinstance(item, (Population, Port, Projection)):
+                        elif isinstance(item, (NodeGroup, NodePort, EdgeGroup)):
                             pass
                         else:
                             print(f"error at {list_path}: cannot set path for {item}")
                 else:
                     print(f"error at {current_path}: cannot set path for {value}")
-        def _flatten_projections(top, parent_path=''):
+        def _flatten_edgegroups(top, parent_path=''):
             for key, value in vars(top).items():
                 if key.startswith('_'):
                     continue
                 current_path = f"{parent_path}.{key}" if parent_path else key
                 # If the value is another topwork, recurse
                 if isinstance(value, Topology):
-                    _flatten_projections(value, current_path)
-                # If the value is a projection, replace any temp paths
-                elif isinstance(value, Projection):
+                    _flatten_edgegroups(value, current_path)
+                # If the value is an edgegroup, replace any temp paths
+                elif isinstance(value, EdgeGroup):
                     if isinstance(value.source, TempPath):
                         value.source = reduce(top.access, top.expand_path(value.source.path), top)
                         if isinstance(value.source, TempPath):
@@ -260,15 +260,15 @@ class Topology(SimpleNamespace):
                         if isinstance(value.target, TempPath):
                             print(f"error at {current_path}: {value.target.path} does not exist")
                     value.set_path(current_path)
-                elif isinstance(value, (Population, Port, Pack)):
+                elif isinstance(value, (NodeGroup, NodePort, NodeList)):
                     pass
                 # If the value is a list, loop through 
                 elif isinstance(value, list):
                     for i, item in enumerate(value):
                         list_path = f"{current_path}[{i}]"
                         if isinstance(item, Topology):
-                            _flatten_projections(item, list_path)
-                        elif isinstance(item, Projection):
+                            _flatten_edgegroups(item, list_path)
+                        elif isinstance(item, EdgeGroup):
                             if isinstance(item.source, TempPath):
                                 item.source = reduce(top.access, top.expand_path(item.source.path), top)
                                 if isinstance(item.source, TempPath):
@@ -278,16 +278,16 @@ class Topology(SimpleNamespace):
                                 if isinstance(item.target, TempPath):
                                     print(f"error at {list_path}: {item.target.path} does not exist")
                             item.set_path(list_path)
-                        elif isinstance(item, (Population, Port, Pack)):
+                        elif isinstance(item, (NodeGroup, NodePort, NodeList)):
                             pass
                         else:
                             print(f"error at {list_path}: cannot set path for {item}")
                 else:
                     print(f"error at {current_path}: cannot set path for {value}")
         # Flattening order is important for resolution
-        _flatten_populations(self) # first for populations
-        _flatten_packs(self)       # then for packs
-        _flatten_projections(self) # finally for projections
+        _flatten_nodegroups(self) # first for node groups (and ports)
+        _flatten_nodelists(self)  # then for node lists
+        _flatten_edgegroups(self) # finally for edge groups
         
     # Connect network elements
     def connect(self, source, target, model=None, edges=None):
@@ -301,18 +301,18 @@ class Topology(SimpleNamespace):
             if isinstance(target, TempPath):
                 print(f"connection error: {target.path} does not exist")
         # Link ports with object references
-        if isinstance(target, Port):
+        if isinstance(target, NodePort):
             print('linking port as target')
             if (len(source) != len(target)):
                 print(f"warning: port size mismatch {len(source)} -> {len(target)}")
             target.set_link(source) # by reference
-        # Connect populations and packs with projections
-        if (isinstance(source, (Population, Pack)) and
-            isinstance(target, (Population, Pack))):
-            #print('adding unnamed projection')
-            self.projections.append(Projection(source, target, model, edges))
+        # Connect node groups and lists with edge groups
+        if (isinstance(source, (NodeGroup, NodeList)) and
+            isinstance(target, (NodeGroup, NodeList))):
+            #print('adding unnamed edgegroup')
+            self.edgegroups.append(EdgeGroup(source, target, model, edges))
         # Connecting individual nodes?
-        # Connecting multiple projections?
+        # Connecting multiple edgegroups?
 
     # Generate a networkx graph
     def to_nx(self):
@@ -332,20 +332,20 @@ class Topology(SimpleNamespace):
                     continue
                 if isinstance(value, Topology):
                     populate(value, graph)
-                elif isinstance(value, Population):
+                elif isinstance(value, NodeGroup):
                     for node in value:
                         graph.add_node(node.name, **flatten_data(node.data))
-                elif isinstance(value, Projection):
+                elif isinstance(value, EdgeGroup):
                     for edge in value:
                         graph.add_edge(edge.source_name, edge.target_name, **flatten_data(edge.data))
                 elif isinstance(value, list):
                     for i, item in enumerate(value):
                         if isinstance(item, Topology):
                             populate(item, graph)
-                        elif isinstance(item, Population):
+                        elif isinstance(item, NodeGroup):
                             for node in item:
                                 graph.add_node(node.name, **flatten_data(node.data))
-                        elif isinstance(item, Projection):
+                        elif isinstance(item, EdgeGroup):
                             for edge in item:
                                 graph.add_edge(edge.source_name, edge.target_name, **flatten_data(edge.data))
 
@@ -373,11 +373,11 @@ class Network:
     def __setattr__(self, name, value):
         if name.startswith('_'): # special attributes
             super().__setattr__(name, value)
-        elif isinstance(value, Port):
+        elif isinstance(value, NodePort):
             # add dependency for ports
             self._dependencies[name] = value
             self.add(name, value)
-        elif isinstance(value, (Network, Population, Projection, Pack)):
+        elif isinstance(value, (Network, NodeGroup, EdgeGroup, NodeList)):
             self.add(name, value)
         elif type(value) is list:
             # stash empty lists for later
@@ -386,10 +386,10 @@ class Network:
                 print(f"warning: adding an empty list {name}")
                 self._emptylists[name] = value
             # all items in list should be the same type
-            elif isinstance(value[0], Port):
+            elif isinstance(value[0], NodePort):
                 self._dependencies[name] = value
                 self.add(name, value)
-            elif isinstance(value[0], (Network, Population, Projection, Pack)):
+            elif isinstance(value[0], (Network, NodeGroup, EdgeGroup, NodeList)):
                 self.add(name, value)
             else:
                 # regular attributes
@@ -455,7 +455,7 @@ class Network:
         else:
             setattr(self._topology, name, value)
 
-    # Adding connections (links, unnamed projections)
+    # Adding connections (links, unnamed edgegroups)
     def connect(self, source, target, model=None, edges=None):
         # stash connections for future processing
         key = str(len(self._connections))
@@ -517,10 +517,10 @@ class Network:
                 print(f"warning: setting an empty list {name}")
                 super().__setattr__(name, value)
             # all items in list should be the same type
-            elif isinstance(value[0], Port):
+            elif isinstance(value[0], NodePort):
                 self._dependencies[name] = value
                 self.add(name, value)
-            elif isinstance(value[0], (Network, Population, Projection, Pack)):
+            elif isinstance(value[0], (Network, NodeGroup, EdgeGroup, NodeList)):
                 self.add(name, value)
             else:
                 # regular attributes
@@ -579,7 +579,7 @@ class Network:
                     if isinstance(target, TempPath):
                         print(f"info: connection path {target.path} does not exist (yet)")
                 # connect ports (bypass topology methods)
-                if (isinstance(target, Port) and
+                if (isinstance(target, NodePort) and
                     not isinstance(source, TempPath)):
                     print('info: linking port as target')
                     if target.size is None:
@@ -591,10 +591,10 @@ class Network:
                     else:
                         print(f"error linking {target}: already linked")
                     connections.append(key)
-                # connect unnamed projections
-                if (isinstance(source, (Population, Pack)) and
-                    isinstance(target, (Population, Pack))):
-                    print('info: adding unnamed projection')
+                # connect unnamed edgegroups
+                if (isinstance(source, (NodeGroup, NodeList)) and
+                    isinstance(target, (NodeGroup, NodeList))):
+                    print('info: adding unnamed edgegroup')
                     self._topology.connect(source, target, model, edges)
                     connections.append(key)
             # cleanup any added connections from list
@@ -611,7 +611,7 @@ class Network:
                     for i, item in enumerate(value):
                         item_dep_keys = []
                         for item_dep_key, item_dep_value in item._dependencies.items():
-                            if isinstance(item_dep_value, Port):
+                            if isinstance(item_dep_value, NodePort):
                                 if item_dep_value.size is not None:
                                     print(f"info: dependency resolved for {item_dep_key}")
                                     item_dep_keys.append(item_dep_key)
@@ -626,7 +626,7 @@ class Network:
                 else:
                     dep_keys = []
                     for dep_key, dep_value in value._dependencies.items():
-                        if isinstance(dep_value, Port):
+                        if isinstance(dep_value, NodePort):
                             if dep_value.size is not None:
                                 print(f"info: dependency resolved for {dep_key}")
                                 dep_keys.append(dep_key)

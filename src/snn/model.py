@@ -1,15 +1,37 @@
 # General Imports
 from dataclasses import dataclass, field
 
-# Model classes
+# Base model classes
 @dataclass
-class Neuron:
+class NodeModel:
+    model: str = 'NodeModel'
+
+@dataclass
+class EdgeModel:
+    model: str = 'EdgeModel'
+
+@dataclass
+class InputModel(NodeModel):
+    model: str = 'InputModel'
+    
+@dataclass
+class OutputModel(NodeModel):
+    model: str = 'OutputModel'
+
+# SNN generic classes
+@dataclass
+class Neuron(NodeModel):
     model: str = 'Neuron'
 
 @dataclass
-class Synapse:
+class Synapse(EdgeModel):
     model: str = 'Synapse'
 
+@dataclass
+class SpikeGen(InputModel):
+    model: str = 'SpikeGen'
+
+# SNN substrate models
 @dataclass
 class LIF(Neuron):
     model: str = 'LIF'
@@ -26,7 +48,6 @@ class PSP(Synapse):
     weight: float = 1.0
 
 @dataclass
-class IN(Neuron):
+class IN(SpikeGen):
     model: str = 'IN'
-    #times: object = None # supposed to be list
     times: list[float] = field(default_factory=list)
