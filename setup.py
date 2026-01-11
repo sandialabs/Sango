@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="snn-dsl",         # Name of your package
-    version="2025.12.31",   # Current version
+    version="2026.1.10",    # Current version
     author="Felix Wang",
     author_email="felwang@sandia.gov",
     description="Compositional Spiking Neural Network Domain Specific Language",
