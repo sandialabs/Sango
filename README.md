@@ -4,7 +4,7 @@ The SNN-DSL developed here is implemented as an internal DSL within Python, intr
 
 ## Installation
 
-The SNN-DSL package requires Python 3.9 or above (for more advanced dataclass support). There are also two main package dependencies that are currently used: NumPy and NetworkX. The features used by these external packages are fairly generic, so versioning should not be an issue. Installation proceeds as with any standard python package.
+The SNN-DSL package requires Python 3.9 or above (for more advanced dataclass support). There are also two main dependencies that are currently required: NumPy and NetworkX. The features used by these external packages are fairly generic, so versioning should not be an issue. Installation proceeds as with any standard python package.
 
 ```
 git clone https://cee-gitlab.sandia.gov/nerl/snn-dsl.git
