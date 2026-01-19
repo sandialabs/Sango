@@ -315,7 +315,7 @@ class Topology(SimpleNamespace):
                 print(f"warning: port size mismatch {len(source)} -> {len(target)}")
             target.set_link(source) # by reference
         # Connect node groups and lists with edge groups
-        if (isinstance(source, (NodeGroup, NodeList)) and
+        if (isinstance(source, (NodeGroup, NodePort, NodeList)) and
             isinstance(target, (NodeGroup, NodeList))):
             #print('adding unnamed edgegroup')
             self.edgegroups.append(EdgeGroup(source, target, model, edges))
@@ -618,7 +618,7 @@ class Network:
                         print(f"error linking {target}: already linked")
                     connections.append(key)
                 # connect unnamed edgegroups
-                if (isinstance(source, (NodeGroup, NodeList)) and
+                if (isinstance(source, (NodeGroup, NodePort, NodeList)) and
                     isinstance(target, (NodeGroup, NodeList))):
                     print('info: adding unnamed edgegroup')
                     self._topology.connect(source, target, model, edges)
