@@ -27,7 +27,7 @@ class TempPath:
         net_dir = []
         # getting dir hints for tab completion (kinda cursed)
         if isinstance(self.net, Network):
-            net_path = reduce(self.net.access, self.net.expand_path(self.path), self.net)
+            net_path = self.net.access(self.path)
             net_dir += list(vars(net_path).keys())
             if isinstance(net_path, Network):
                 net_dir += (list(vars(net_path._topology).keys())
@@ -37,6 +37,21 @@ class TempPath:
 
 # Directory structure of network topology
 class Topology(SimpleNamespace):
+    def __init__(self, net=None, **kwargs):
+        super().__init__(**kwargs)
+        for key, value in kwargs.items():
+            if type(value) == dict:
+                setattr(self, key, Topology(**value))
+            elif type(value) == list:
+                setattr(self, key, list(map(self.map_entry, value)))
+        # link back to parent network if provided
+        if isinstance(net, Network):
+            self._network = net
+        else:
+            self._network = None
+        # unnamed edgegroups
+        self.edgegroups = list()
+
     # Not really used anymore
     @staticmethod
     def map_entry(entry):
@@ -46,7 +61,7 @@ class Topology(SimpleNamespace):
 
     # Traverse the path tree
     @staticmethod
-    def access(root, name):
+    def traverse(root, name):
         if root is None:
             return
         elif isinstance(root, TempPath):
@@ -60,7 +75,7 @@ class Topology(SimpleNamespace):
             
     # Traverse the path tree (for node lists)
     @staticmethod
-    def access_node(root, name):
+    def traverse_node(root, name):
         if root is None:
             return
         elif isinstance(root, TempPath):
@@ -98,25 +113,18 @@ class Topology(SimpleNamespace):
                 expanded.append(num)
         return expanded
 
-    def __init__(self, net=None, **kwargs):
-        super().__init__(**kwargs)
-        for key, value in kwargs.items():
-            if type(value) == dict:
-                setattr(self, key, Topology(**value))
-            elif type(value) == list:
-                setattr(self, key, list(map(self.map_entry, value)))
-        # link back to parent network if provided
-        if isinstance(net, Network):
-            self._network = net
-        else:
-            self._network = None
-        # unnamed edgegroups
-        self.edgegroups = list()
+    # Helper function for traversing the path tree
+    def access(self, path):
+        return reduce(self.traverse, self.expand_path(path), self)
+
+    # Helper function for traversing the path tree (for node lists)
+    def access_node(self, path):
+        return reduce(self.traverse_node, self.expand_path(path), self)
 
     # Temporary path if object doesn't exist
     def __getattr__(self, key):
         return TempPath(self._network, self, key)
-    
+
     def __str__(self):
         def format_paths(top):
             paths = []
@@ -192,7 +200,7 @@ class Topology(SimpleNamespace):
                 elif isinstance(value, NodeList):
                     for i, item in enumerate(value):
                         if isinstance(item, TempPath):
-                            node = reduce(top.access_node, top.expand_path(item.path), top)
+                            node = top.access_node(item.path)
                             if isinstance(node, TempPath):
                                 print(f"error at {current_path}: {node.path} does not exist")
                             else:
@@ -200,7 +208,7 @@ class Topology(SimpleNamespace):
                         elif isinstance(item, Link):
                             if isinstance(item.link, TempPath):
                                 # top level search
-                                node = reduce(self.access_node, self.expand_path(item.link.path), self)
+                                node = self.access_node(item.link.path)
                                 if isinstance(node, TempPath):
                                     print(f"error at {current_path}: {node.path} does not exist")
                                 else:
@@ -219,7 +227,7 @@ class Topology(SimpleNamespace):
                         elif isinstance(item, NodeList):
                             for e, entry in enumerate(item):
                                 if isinstance(entry, TempPath):
-                                    node = reduce(top.access_node, top.expand_path(entry.path), top)
+                                    node = top.access_node(entry.path)
                                     if isinstance(node, TempPath):
                                         print(f"error at {list_path}: {node.path} does not exist")
                                     else:
@@ -227,7 +235,7 @@ class Topology(SimpleNamespace):
                                 elif isinstance(entry, Link):
                                     if isinstance(entry.link, TempPath):
                                         # top level search
-                                        node = reduce(self.access_node, self.expand_path(entry.link.path), self)
+                                        node = self.access_node(entry.link.path)
                                         if isinstance(node, TempPath):
                                             print(f"error at {list_path}: {node.path} does not exist")
                                         else:
@@ -252,11 +260,11 @@ class Topology(SimpleNamespace):
                 # If the value is an edgegroup, replace any temp paths
                 elif isinstance(value, EdgeGroup):
                     if isinstance(value.source, TempPath):
-                        value.source = reduce(top.access, top.expand_path(value.source.path), top)
+                        value.source = top.access(value.source.path)
                         if isinstance(value.source, TempPath):
                             print(f"error at {current_path}: {value.source.path} does not exist")
                     if isinstance(value.target, TempPath):
-                        value.target = reduce(top.access, top.expand_path(value.target.path), top)
+                        value.target = top.access(value.target.path)
                         if isinstance(value.target, TempPath):
                             print(f"error at {current_path}: {value.target.path} does not exist")
                     value.set_path(current_path)
@@ -270,11 +278,11 @@ class Topology(SimpleNamespace):
                             _flatten_edgegroups(item, list_path)
                         elif isinstance(item, EdgeGroup):
                             if isinstance(item.source, TempPath):
-                                item.source = reduce(top.access, top.expand_path(item.source.path), top)
+                                item.source = top.access(item.source.path)
                                 if isinstance(item.source, TempPath):
                                     print(f"error at {list_path}: {item.source.path} does not exist")
                             if isinstance(item.target, TempPath):
-                                item.target = reduce(top.access, top.expand_path(item.target.path), top)
+                                item.target = top.access(item.target.path)
                                 if isinstance(item.target, TempPath):
                                     print(f"error at {list_path}: {item.target.path} does not exist")
                             item.set_path(list_path)
@@ -293,11 +301,11 @@ class Topology(SimpleNamespace):
     def connect(self, source, target, model=None, edges=None):
         # Convert any temporary paths to source/target object references
         if isinstance(source, TempPath):
-            source = reduce(self.access, self.expand_path(source.path), self)
+            source = self.access(source.path)
             if isinstance(source, TempPath):
                 print(f"connection error: {source.path} does not exist")
         if isinstance(target, TempPath):
-            target = reduce(self.access, self.expand_path(target.path), self)
+            target = self.access(target.path)
             if isinstance(target, TempPath):
                 print(f"connection error: {target.path} does not exist")
         # Link ports with object references
@@ -465,7 +473,7 @@ class Network:
     # Manually setting port sizes (for breaking dependency chains)
     def set_portsize(self, port, size):
         if isinstance(port, TempPath):
-            port = reduce(self.access, self.expand_path(port.path), self)
+            port = self.access(port.path)
         if isinstance(port, TempPath):
             print(f"error: {port.path} does not exist")
             return
@@ -477,7 +485,7 @@ class Network:
     
     # Traverse the path tree
     @staticmethod
-    def access(root, name):
+    def traverse(root, name):
         if root is None:
             return
         elif isinstance(root, TempPath):
@@ -518,6 +526,10 @@ class Network:
             for num in nums:
                 expanded.append(num)
         return expanded
+
+    # Helper function for traversing the path tree
+    def access(self, path):
+        return reduce(self.traverse, self.expand_path(path), self)
 
     # Passthrough method for build
     def build(self):
@@ -585,11 +597,11 @@ class Network:
             for key, (source, target, model, edges) in self._connections.items():
                 # try to resolve any temporary paths
                 if isinstance(source, TempPath):
-                    source = reduce(self.access, self.expand_path(source.path), self)
+                    source = self.access(source.path)
                     if isinstance(source, TempPath):
                         print(f"info: connection path {source.path} does not exist (yet)")
                 if isinstance(target, TempPath):
-                    target = reduce(self.access, self.expand_path(target.path), self)
+                    target = self.access(target.path)
                     if isinstance(target, TempPath):
                         print(f"info: connection path {target.path} does not exist (yet)")
                 # connect ports (bypass topology methods)
