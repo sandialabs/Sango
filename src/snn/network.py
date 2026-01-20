@@ -370,6 +370,7 @@ class Network:
         self._built = False
         self._graph = None
         # Scaffolding
+        self._name = ''
         self._parent = parent
         self._children = dict()
         self._connections = dict()
@@ -392,7 +393,7 @@ class Network:
             # stash empty lists for later
             # we expect these to be generated procedurally
             if not value:
-                print(f"warning: adding an empty list {name}")
+                print(f"info: adding empty list {self.net_path()}{name}")
                 self._emptylists[name] = value
             # all items in list should be the same type
             elif isinstance(value[0], NodePort):
@@ -444,21 +445,23 @@ class Network:
     def add(self, name, value):
         # stash networks for future processing
         if isinstance(value, Network):
-            print('info: adding network')
+            print(f"info: adding network {self.net_path()}{name}")
             self._children[name] = value
             value._parent = self
+            value._name = f"{name}"
         # also stash lists of networks
         elif (type(value) is list):
             if isinstance(value[0], Network):
                 if not all(isinstance(item, Network) for item in value):
-                    print(f"error adding {name} list: not all elements are networks")
-                print('info: adding list of networks')
+                    print(f"error adding {self.net_path}{name} list: not all elements are networks")
+                print(f"info: adding list of networks {self.net_path()}{name}")
                 self._children[name] = value
                 # placeholder paths for network lists
                 self._netlists[name] = [TempPath(self, self._topology, f"{name}[{i}]")
                                         for i in range(len(value))]
-                for item in value:
+                for i, item in enumerate(value):
                     item._parent = self
+                    item._name = f"{name}[{i}]"
             else:
                 setattr(self._topology, name, value)
         else:
@@ -531,6 +534,13 @@ class Network:
     def access(self, path):
         return reduce(self.traverse, self.expand_path(path), self)
 
+    # Traversing up the path tree to get full path
+    def net_path(self):
+        if self._parent is None:
+            return '' # name should be ''
+        else:
+            return f"{self._parent.net_path()}{self._name}."
+
     # Passthrough method for build
     def build(self):
         self._build()
@@ -540,7 +550,7 @@ class Network:
         # Go through any previously uninitialized lists
         for name, value in self._emptylists.items():
             if not value:
-                print(f"warning: setting an empty list {name}")
+                print(f"warning: setting empty list {self.net_path()}{name}")
                 super().__setattr__(name, value)
             # all items in list should be the same type
             elif isinstance(value[0], NodePort):
@@ -570,7 +580,7 @@ class Network:
                     for i, item in enumerate(value):
                         # build any item that can be built (that hasn't already been built)
                         if not item._dependencies and item._built == False:
-                            print(f"info: building {key}[{i}]")
+                            print(f"info: building network {self.net_path()}{key}[{i}]")
                             item.build()
                             item._built = True
                             # update the placeholder list item
@@ -582,7 +592,7 @@ class Network:
                         children.append(key)
                 else:
                     if not value._dependencies:
-                        print(f"info: building {key}")
+                        print(f"info: building network {self.net_path()}{key}")
                         value.build()
                         value._built = True
                         setattr(self._topology, key, value._topology)
@@ -596,22 +606,24 @@ class Network:
             connections = []
             for key, (source, target, model, edges) in self._connections.items():
                 # try to resolve any temporary paths
+                source_path = source.path
                 if isinstance(source, TempPath):
                     source = self.access(source.path)
                     if isinstance(source, TempPath):
-                        print(f"info: connection path {source.path} does not exist (yet)")
+                        print(f"info: waiting on source {self.net_path()}{source_path}")
+                target_path = target.path
                 if isinstance(target, TempPath):
                     target = self.access(target.path)
                     if isinstance(target, TempPath):
-                        print(f"info: connection path {target.path} does not exist (yet)")
+                        print(f"info: waiting on target {self.net_path()}{target_path}")
                 # connect ports (bypass topology methods)
                 if (isinstance(target, NodePort) and
                     not isinstance(source, TempPath)):
-                    print('info: linking port as target')
+                    print(f"info: linking port {self.net_path()}{target_path}")
                     if target.size is None:
                         target.set_size(source.size)
                     elif (len(source) != len(target)):
-                        print(f"error linking {target}: port size mismatch {len(source)} -> {len(target)}")
+                        print(f"error: linking port {self.net_path()}{target_path} size mismatch {len(source)} -> {len(target)}")
                     if target.link is None:
                         target.set_link(source)
                     else:
@@ -639,11 +651,11 @@ class Network:
                         for item_dep_key, item_dep_value in item._dependencies.items():
                             if isinstance(item_dep_value, NodePort):
                                 if item_dep_value.size is not None:
-                                    print(f"info: dependency resolved for {item_dep_key}")
+                                    print(f"info: resolving dependency for {item.net_path()}{item_dep_key}")
                                     item_dep_keys.append(item_dep_key)
                             elif type(item_dep_value) is list:
                                 if all(item_dep_item.size is not None for item_dep_item in item_dep_value):
-                                    print(f"info: dependency resolved for {item_dep_key}")
+                                    print(f"info: resolving dependency for {item.net_path()}{item_dep_key}")
                                     item_dep_keys.append(item_dep_key)
                             else:
                                 print(f"error: dependency value at {item_dep_value}")
@@ -654,11 +666,11 @@ class Network:
                     for dep_key, dep_value in value._dependencies.items():
                         if isinstance(dep_value, NodePort):
                             if dep_value.size is not None:
-                                print(f"info: dependency resolved for {dep_key}")
+                                print(f"info: resolving dependency for {value.net_path()}{dep_key}")
                                 dep_keys.append(dep_key)
                         elif type(dep_value) is list:
                             if all(dep_item.size is not None for dep_item in dep_value):
-                                print(f"info: dependency resolved for {dep_key}")
+                                print(f"info: resolving dependency for {value.net_path()}{dep_key}")
                                 dep_keys.append(dep_key)
                         else:
                             print(f"error: dependency value at {dep_value}")
