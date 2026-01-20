@@ -14,7 +14,7 @@ python -m pip install -e .
 
 ## General Structure
 
-At the core of the DSL is the structual organization of networks analogous to a directory listing of folders (networks themselves), files (topological components), and their contents (nodes and edges). Additionally, alias classes (analogous to symlinks) provide a degree of indirection and introduce reference dependencies that allows for the procedural construction of complex network topologies.
+At the core of the DSL is the structural organization of networks analogous to a directory listing of folders (networks themselves), files (topological components), and their contents (nodes and edges). Additionally, alias classes (analogous to symlinks) provide a degree of indirection and introduce reference dependencies that allows for the procedural construction of complex network topologies.
 
 The main classes that accomplish this are:
 - `Network`: the main container that is built out of high-level topological components (including other networks)
