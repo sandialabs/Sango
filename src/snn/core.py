@@ -146,6 +146,8 @@ class NodeGroup(list):
         super().append(Node(index))
         # append to numpy arrays (very slow...)
         for key, value in vars(self.nodemodel).items():
+            if isinstance(value, (str, tuple)): # don't update shared params
+                continue
             if key in kwargs:
                 self.__dict__[key] = np.append(self.__dict__[key], kwargs[key])
             else: # defaults
@@ -291,6 +293,8 @@ class EdgeGroup(list):
         self.edge_map[(s,t)] = index
         # append to numpy arrays (very slow...)
         for key, value in vars(self.edgemodel).items():
+            if isinstance(value, (str, tuple)): # don't update shared params
+                continue
             if key in kwargs:
                 self.__dict__[key] = np.append(self.__dict__[key], kwargs[key])
             else: # defaults
