@@ -13,17 +13,22 @@ class SimSTACS:
         self.num_streams = 0
         self.num_nodes = 0
         self.num_edges = 0
-        self.has_input = True
-        self.spike_input = dict()
+        
         self.netwkdir = './dslnet'
         self.filebase = 'network'
         self.recordir = 'record'
         self.netparts = 1
         self.netfiles = 1
+        
+        self.has_input = True
+        self.spike_input = dict()
+        self.spike_list = None
+        
         self.ticks_per_ms = 1000000
         self.timesteps = None
+        
         self.debug = True
-        self.spike_list = None
+        self.verbose = True
 
         # Model registry
         self.model_registry = {'SI':  {'model_type': 5, 'type': 'stream'},
@@ -407,87 +412,128 @@ class SimSTACS:
 
     # Write the topology out to dCSR
     def write_dcsr(self):
+        # Parts to files bookkeeping
+        part_div = self.netparts // self.netfiles
+        part_rem = self.netparts % self.netfiles
+        num_part = [0 for _ in range(self.netfiles)]
+        part_prefix = [0 for _ in range(self.netfiles + 1)]
+        for fileidx in range(self.netfiles):
+            if fileidx < part_rem:
+                num_part[fileidx] = part_div + 1
+                part_prefix[fileidx] = fileidx * part_div + fileidx
+            else:
+                num_part[fileidx] = part_div
+                part_prefix[fileidx] = fileidx * part_div + part_rem
+        part_prefix[self.netfiles] = self.netparts
+        
+        # Nodes to parts bookkeeping
+        node_div = self.num_nodes // self.netparts
+        node_rem = self.num_nodes % self.netparts
+        node_part = [0 for _ in range(self.netparts)]
+        node_prefix = [0 for _ in range(self.netparts + 1)]
+        for partidx in range(self.netparts):
+            if partidx < node_rem:
+                node_part[partidx] = node_div + 1
+                node_prefix[partidx] = partidx * node_div + partidx
+            else:
+                node_part[partidx] = node_div
+                node_prefix[partidx] = partidx * node_div + node_rem
+        node_prefix[self.netparts] = self.num_nodes
+        
         # Adjcy
-        fname = f"{self.netwkdir}/{self.filebase}.adjcy.0"
-        with open(fname,"w") as file:
-            for n in range(self.num_nodes):
-                #print(' ' + ' '.join(str(key) for key in self.edge_data[n]))
-                file.write(' ' + ' '.join(str(key) for key in self.edge_data[n]) + '\n')
-
+        for fileidx in range(self.netfiles):
+            fname = f"{self.netwkdir}/{self.filebase}.adjcy.{fileidx}"
+            with open(fname,"w") as file:
+                for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
+                    #print(' ' + ' '.join(str(key) for key in self.edge_data[n]))
+                    file.write(' ' + ' '.join(str(key) for key in self.edge_data[n]) + '\n')
+    
         # State
-        self.num_states = 0
-        self.num_sticks = 0
-        fname = f"{self.netwkdir}/{self.filebase}.state.0"
-        with open(fname,"w") as file:
-            for n in range(self.num_nodes):
-                info = []
-                info.append(self.node_data[n]['model'])
-                if self.node_data[n]['model'] in self.input_model:
-                    # no states
-                    pass
-                else:
-                    for key, value in self.stacs_model[self.node_data[n]['model']].items():
-                        info.append(str(self.node_data[n][key]))
-                        self.num_states += 1
-                for value in self.edge_data[n].values():
-                    if value is None:
-                        info.append('none')
-                    else:
-                        info.append(value['model'])
-                        # states then sticks
-                        state_info = []
-                        stick_info = []
-                        for key, item in self.stacs_model[value['model']].items():
-                            if 'rep' in item and item['rep'] == 'tick':
-                                stick_info.append(f'{int(value[key])*self.ticks_per_ms:x}')
-                                self.num_sticks += 1
+        edge_prefix = [0 for _ in range(self.netparts + 1)]
+        state_prefix = [0 for _ in range(self.netparts + 1)]
+        stick_prefix = [0 for _ in range(self.netparts + 1)]
+        for fileidx in range(self.netfiles):
+            fname = f"{self.netwkdir}/{self.filebase}.state.{fileidx}"
+            with open(fname,"w") as file:
+                for partidx in range(part_prefix[fileidx], part_prefix[fileidx+1]):
+                    edge_prefix[partidx+1] = edge_prefix[partidx]
+                    state_prefix[partidx+1] = state_prefix[partidx]
+                    stick_prefix[partidx+1] = stick_prefix[partidx]
+                    for n in range(node_prefix[partidx], node_prefix[partidx+1]):
+                        info = []
+                        info.append(self.node_data[n]['model'])
+                        if self.node_data[n]['model'] in self.input_model:
+                            # no states
+                            pass
+                        else:
+                            for key, value in self.stacs_model[self.node_data[n]['model']].items():
+                                info.append(str(self.node_data[n][key]))
+                                state_prefix[partidx+1] += 1
+                        for value in self.edge_data[n].values():
+                            edge_prefix[partidx+1] += 1
+                            if value is None:
+                                info.append('none')
                             else:
-                                state_info.append(str(value[key]))
-                                self.num_states += 1
-                        info.extend(state_info + stick_info)
-                #print(' ' + ' '.join(info))
-                file.write(' ' + ' '.join(info) + '\n')
-
+                                info.append(value['model'])
+                                # states then sticks
+                                state_info = []
+                                stick_info = []
+                                for key, item in self.stacs_model[value['model']].items():
+                                    if 'rep' in item and item['rep'] == 'tick':
+                                        stick_info.append(f'{int(value[key])*self.ticks_per_ms:x}')
+                                        stick_prefix[partidx+1] += 1
+                                    else:
+                                        state_info.append(str(value[key]))
+                                        state_prefix[partidx+1] += 1
+                                info.extend(state_info + stick_info)
+                        #print(' ' + ' '.join(info))
+                        file.write(' ' + ' '.join(info) + '\n')
+    
         # Index
         local_index = {key: 0 for key in self.model_count.keys()}
-        fname = f"{self.netwkdir}/{self.filebase}.index.0"
-        with open(fname,"w") as file:
-            for n in range(self.num_nodes):
-                # print(' ' + ' '.join(str(index) for index in [n, self.model_index[self.node_data[n]['model']],
-                #                                               local_index[self.node_data[n]['model']]]))
-                file.write(' ' + ' '.join(str(index) for index in [n, self.model_index[self.node_data[n]['model']],
-                                                                   local_index[self.node_data[n]['model']]]) + '\n')
-                local_index[self.node_data[n]['model']] += 1
-        
+        for fileidx in range(self.netfiles):
+            fname = f"{self.netwkdir}/{self.filebase}.index.{fileidx}"
+            with open(fname,"w") as file:
+                for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
+                    # print(' ' + ' '.join(str(index) for index in [n, self.model_index[self.node_data[n]['model']],
+                    #                                               local_index[self.node_data[n]['model']]]))
+                    file.write(' ' + ' '.join(str(index) for index in [n, self.model_index[self.node_data[n]['model']],
+                                                                       local_index[self.node_data[n]['model']]]) + '\n')
+                    local_index[self.node_data[n]['model']] += 1
+            
         # Coord
-        fname = f"{self.netwkdir}/{self.filebase}.coord.0"
-        with open(fname,"w") as file:
-            for n in range(self.num_nodes):
-                # print(' ' + ' '.join(str(0.0) for _ in range(3)))
-                file.write(' ' + ' '.join(str(0.0) for _ in range(3)) + '\n')
-        
+        for fileidx in range(self.netfiles):
+            fname = f"{self.netwkdir}/{self.filebase}.coord.{fileidx}"
+            with open(fname,"w") as file:
+                for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
+                    # print(' ' + ' '.join(str(0.0) for _ in range(3)))
+                    file.write(' ' + ' '.join(str(0.0) for _ in range(3)) + '\n')
+            
         # Event
-        fname = f"{self.netwkdir}/{self.filebase}.event.0"
-        with open(fname,"w") as file:
-            for n in range(self.num_nodes):
-                # print(' 0')
-                file.write(' 0')
+        for fileidx in range(self.netfiles):
+            fname = f"{self.netwkdir}/{self.filebase}.event.{fileidx}"
+            with open(fname,"w") as file:
+                for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
+                    # print(' 0')
+                    file.write(' 0')
 
         # Dist
         fname = f"{self.netwkdir}/{self.filebase}.dist"
         with open(fname,"w") as file:
-            # print(' '.join(str(num) for num in [0, 0, 0, 0, 0]))
-            # print(' '.join(str(num) for num in [self.num_nodes, self.num_edges, self.num_states, self.num_sticks, 0]))
-            file.write(' '.join(str(num) for num in [0, 0, 0, 0, 0]) + '\n')
-            file.write(' '.join(str(num) for num in [self.num_nodes, self.num_edges, self.num_states, self.num_sticks, 0]) + '\n')
+            for partidx in range(self.netparts + 1):
+                # print(' '.join(str(num) for num in [node_prefix[partidx], edge_prefix[partidx],
+                #                                     state_prefix[partidx], stick_prefix[partidx], 0]))
+                file.write(' '.join(str(num) for num in [node_prefix[partidx], edge_prefix[partidx],
+                                                         state_prefix[partidx], stick_prefix[partidx], 0]) + '\n')
 
         # Metis
         fname = f"{self.netwkdir}/{self.filebase}.metis"
         with open(fname,"w") as file:
-            # print(' '.join(str(num) for num in [0, 0]))
-            # print(' '.join(str(num) for num in [self.num_nodes, self.num_edges]))
-            file.write(' '.join(str(num) for num in [0, 0]) + '\n')
-            file.write(' '.join(str(num) for num in [self.num_nodes, self.num_edges]) + '\n')
+            for fileidx in range(self.netfiles + 1):
+                # print(' '.join(str(num) for num in [node_prefix[part_prefix[fileidx]],
+                #                                     edge_prefix[part_prefix[fileidx]]))
+                file.write(' '.join(str(num) for num in [node_prefix[part_prefix[fileidx]],
+                                                         edge_prefix[part_prefix[fileidx]]]) + '\n')
         
     # Write the topology out to input files (for building)
     def write_file(self):
@@ -495,42 +541,6 @@ class SimSTACS:
 
     # Collect any output from the simulation
     def read_spikes(self):
-        def calc_remap(conf_dict, vertex_prefix):
-            vertex_remap = np.zeros(vertex_prefix[-1]).astype(int)
-            # Loop through the index files
-            for fileidx in range(int(conf_dict['netfiles'])):
-                fname = f"{conf_dict['netwkdir']}/{conf_dict['filebase']}.index.{fileidx}"
-                with open(fname, 'r') as findex:
-                    for line in findex:
-                        global_index, group_index, local_index = line.split()
-                        vertex_remap[int(global_index)] = vertex_prefix[int(group_index)] + int(local_index)
-            return vertex_remap
-        
-        def read_records(conf_dict, record_points, vertex_prefix, vertex_remap):
-            # Collect spikes into an event list
-            event_list = [[] for _ in range(vertex_prefix[-1])]
-            for record in record_points:
-                for fileidx in range(int(conf_dict['netfiles'])):
-                    fname = f"{conf_dict['netwkdir']}/{conf_dict['recordir']}/{conf_dict['filebase']}.evtlog.{record}.{fileidx}"
-                    with open(fname, 'r') as file:
-                        for line in file:
-                            # the event format is [event type, timestamp, vertex index, optional payload]
-                            event = line.split()
-                            event_type = int (event[0])
-                            timestamp = float(int(event[1], 16)) / self.ticks_per_ms
-                            global_index = int(event[2])
-                            # reindex the events
-                            index = int(vertex_remap[global_index])
-                            # spikes are event type "0"
-                            if event_type == 0:
-                                event_list[index].append(timestamp)
-            return event_list
-        
-        # Get the main configuration yaml
-        fname = f"{self.netwkdir}/{self.filebase}.yml"
-        with open(fname,"r") as file:
-            conf_yaml = yaml.safe_load(file)
-            
         # Calculate some information from the graph file
         fname = f"{self.netwkdir}/{self.filebase}.graph"
         with open(fname,"r") as file:
@@ -551,15 +561,40 @@ class SimSTACS:
 
         # Because the neuron models are potentially distributed over multiple
         # partitions, we need to find the reindexing mapping for cleaner plotting
-        self.vertex_remap = calc_remap(conf_yaml, self.vertex_prefix)
+        self.vertex_remap = np.zeros(self.vertex_prefix[-1]).astype(int)
+        for fileidx in range(self.netfiles):
+            fname = f"{self.netwkdir}/{self.filebase}.index.{fileidx}"
+            with open(fname, 'r') as findex:
+                for line in findex:
+                    global_index, group_index, local_index = line.split()
+                    self.vertex_remap[int(global_index)] = self.vertex_prefix[int(group_index)] + int(local_index)
         
         # Reading in data from event logs, which are stored 
         # by recording interval in simulation iterations
+        fname = f"{self.netwkdir}/{self.filebase}.yml"
+        with open(fname,"r") as file:
+            conf_yaml = yaml.safe_load(file)
         record_interval = int(conf_yaml['trecord']/conf_yaml['tstep'])
         record_max = int(conf_yaml['tmax']/conf_yaml['tstep'])
         self.record_points = list(range(record_interval, record_max, record_interval))+[record_max]
-        
-        self.spike_list = read_records(conf_yaml, self.record_points, self.vertex_prefix, self.vertex_remap)
+
+        # Read the record files and collect spikes into an event list
+        self.spike_list = [[] for _ in range(self.vertex_prefix[-1])]
+        for record in self.record_points:
+            for fileidx in range(self.netfiles):
+                fname = f"{self.netwkdir}/{self.recordir}/{self.filebase}.evtlog.{record}.{fileidx}"
+                with open(fname, 'r') as file:
+                    for line in file:
+                        # the event format is [event type, timestamp, vertex index, optional payload]
+                        event = line.split()
+                        event_type = int (event[0])
+                        timestamp = float(int(event[1], 16)) / self.ticks_per_ms
+                        global_index = int(event[2])
+                        # reindex the events
+                        index = int(self.vertex_remap[global_index])
+                        # spikes are event type "0"
+                        if event_type == 0:
+                            self.spike_list[index].append(timestamp)
 
         return self.spike_list
 
