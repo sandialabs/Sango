@@ -20,15 +20,10 @@ class SimSTACS:
         self.netparts = 1
         self.netfiles = 1
         
-        self.has_input = True
-        self.spike_input = dict()
         self.spike_list = None
         
         self.ticks_per_ms = 1000000
         self.timesteps = None
-        
-        self.debug = True
-        self.verbose = True
 
         # Model registry
         self.model_registry = {'SI':  {'model_type': 5, 'type': 'stream'},
@@ -69,7 +64,7 @@ class SimSTACS:
         self.netwkdir = prefix
         self.debug = debug
 
-        # Convert network to stacs and 
+        # Convert network to stacs
         self.to_stacs()
         self.write_yaml()
         #self.write_files()
@@ -104,7 +99,8 @@ class SimSTACS:
         config_yaml['tmax'] = self.timesteps
         with open(runconf,"w") as file:
             yaml.dump(config_yaml,file,sort_keys=False)
-        
+
+        # Call STACS
         runlist = runcmd.split()
         if runmode is not None:
             runlist.append(runmode)
@@ -132,6 +128,7 @@ class SimSTACS:
         # Add special spike_input node (stream)
         input_targets = []
         input_source = dict()
+        self.spike_input = dict()
         if self.has_input:
             for n, (name, value) in enumerate(self.input_model.items()):
                 self.node_map[value['name']] = n
@@ -541,6 +538,11 @@ class SimSTACS:
 
     # Collect any output from the simulation
     def read_spikes(self):
+        # Load main configuration file
+        fname = f"{self.netwkdir}/{self.filebase}.yml"
+        with open(fname,"r") as file:
+            conf_yaml = yaml.safe_load(file)
+
         # Calculate some information from the graph file
         fname = f"{self.netwkdir}/{self.filebase}.graph"
         with open(fname,"r") as file:
@@ -562,7 +564,7 @@ class SimSTACS:
         # Because the neuron models are potentially distributed over multiple
         # partitions, we need to find the reindexing mapping for cleaner plotting
         self.vertex_remap = np.zeros(self.vertex_prefix[-1]).astype(int)
-        for fileidx in range(self.netfiles):
+        for fileidx in range(conf_yaml['netfiles']):
             fname = f"{self.netwkdir}/{self.filebase}.index.{fileidx}"
             with open(fname, 'r') as findex:
                 for line in findex:
@@ -571,9 +573,6 @@ class SimSTACS:
         
         # Reading in data from event logs, which are stored 
         # by recording interval in simulation iterations
-        fname = f"{self.netwkdir}/{self.filebase}.yml"
-        with open(fname,"r") as file:
-            conf_yaml = yaml.safe_load(file)
         record_interval = int(conf_yaml['trecord']/conf_yaml['tstep'])
         record_max = int(conf_yaml['tmax']/conf_yaml['tstep'])
         self.record_points = list(range(record_interval, record_max, record_interval))+[record_max]
@@ -581,19 +580,19 @@ class SimSTACS:
         # Read the record files and collect spikes into an event list
         self.spike_list = [[] for _ in range(self.vertex_prefix[-1])]
         for record in self.record_points:
-            for fileidx in range(self.netfiles):
+            for fileidx in range(conf_yaml['netfiles']):
                 fname = f"{self.netwkdir}/{self.recordir}/{self.filebase}.evtlog.{record}.{fileidx}"
                 with open(fname, 'r') as file:
                     for line in file:
                         # the event format is [event type, timestamp, vertex index, optional payload]
                         event = line.split()
                         event_type = int (event[0])
-                        timestamp = float(int(event[1], 16)) / self.ticks_per_ms
-                        global_index = int(event[2])
-                        # reindex the events
-                        index = int(self.vertex_remap[global_index])
                         # spikes are event type "0"
                         if event_type == 0:
+                            timestamp = float(int(event[1], 16)) / self.ticks_per_ms
+                            # reindex the events and add to list
+                            global_index = int(event[2])
+                            index = int(self.vertex_remap[global_index])
                             self.spike_list[index].append(timestamp)
 
         return self.spike_list
@@ -606,7 +605,9 @@ class SimSTACS:
             return self.spike_list
 
     # Plotting as event plot
-    def plot_spikes(self, figsize=(8,6)):        
+    def plot_spikes(self, figsize=(8,6), color_dict={'LIF': 'tab:blue',
+                                                     'IN': 'tab:orange',
+                                                     'SI': 'tab:green'}):
         if self.spike_list is None:
             self.read_spikes()
             
@@ -614,10 +615,11 @@ class SimSTACS:
         plt.figure(figsize=figsize)
 
         # We can also color the rows according to population
-        color_dict = {key: f"C{i}" for i, key in enumerate(reversed(self.model_count.keys()))}
+        if color_dict is None:
+            color_dict = {key: f"C{i%10}" for i, key in enumerate(self.vertex_modname)}
         event_color = []
         for index, modname in enumerate(self.vertex_modname):
-            event_color.extend([color_dict[modname]] * (self.vertex_prefix[index+1] - self.vertex_prefix[index]))
+            event_color.extend([color_dict[modname]] * self.vertex_order[index])
         # colored lines (for legend)
         for key in color_dict.keys():
             plt.plot(0,0,'-',color=color_dict[key],linewidth=2.0)
