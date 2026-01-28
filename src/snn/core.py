@@ -2,7 +2,7 @@
 import numpy as np
 
 # Package Imports
-from .model import NodeModel, EdgeModel
+from .model.base import NodeModel, EdgeModel
 
 # Base classes
 class Node:
