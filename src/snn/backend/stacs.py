@@ -122,7 +122,8 @@ class SimSTACS:
         self.node_map = dict()
         self.node_data = [dict() for i in range(self.num_nodes)]
         self.edge_data = [dict() for i in range(self.num_nodes)] # this will be dict of dicts
-        self.model_count = Counter()
+        self.group_count = Counter()
+        self.model_set = set()
         self.edge_set = set()
         
         # Add special spike_input node (stream)
@@ -133,7 +134,7 @@ class SimSTACS:
             for n, (name, value) in enumerate(self.input_model.items()):
                 self.node_map[value['name']] = n
                 self.node_data[n] = {'model': name}
-                self.model_count.update([name])
+                self.group_count.update([name])
                 input_targets.append(value['target'])
                 input_source[value['target']] = name
         
@@ -142,7 +143,8 @@ class SimSTACS:
             index = n + self.num_streams
             self.node_map[node] = index
             self.node_data[index] = self.rekey_model(data)
-            self.model_count.update([data['model']])
+            self.group_count.update([self.node_data[index]['model']])
+            self.model_set.add(self.node_data[index]['model'])
             if self.has_input and data['model'] in input_targets:
                 source_index = self.node_map[self.input_model[input_source[data['model']]]['name']]
                 edge_model = self.input_model[input_source[data['model']]]['edge']
@@ -151,10 +153,11 @@ class SimSTACS:
                 self.edge_data[index][source_index] = {**model_name, **default_states}
                 self.edge_data[source_index][index] = None
                 self.edge_set.add((self.edge_data[index][source_index]['model'], self.node_data[source_index]['model'], self.node_data[index]['model']))
+                self.model_set.add(self.edge_data[index][source_index]['model'])
                 self.spike_input[index] = data['times']
                 
         # Get the model insertion order of our counter
-        self.model_index = {key: index for index, key in enumerate(self.model_count.keys())}
+        self.group_index = {key: index for index, key in enumerate(self.group_count.keys())}
         
         # Edges (to semi-undirected format)
         for source, target, data in stacs_network.edges(data=True):
@@ -162,6 +165,7 @@ class SimSTACS:
             t = self.node_map[target]
             self.edge_data[t][s] = self.rekey_model(data)
             self.edge_set.add((self.edge_data[t][s]['model'], self.node_data[s]['model'], self.node_data[t]['model']))
+            self.model_set.add(self.edge_data[t][s]['model'])
             if t not in self.edge_data[s]:
                 self.edge_data[s][t] = None
         
@@ -338,7 +342,7 @@ class SimSTACS:
         # Stream models
         if self.has_input:
             for name, value in self.input_model.items():
-                stream_param = {'n': self.model_count[value['target']]}
+                stream_param = {'n': self.group_count[value['target']]}
                 stream_port = {'input': self.input_model[name]['port']}
                 substrate_models.append(substrate_model(name, params=stream_param, ports=stream_port))
                 # Write the input files too
@@ -350,7 +354,7 @@ class SimSTACS:
                     yaml.dump({'spike_list': input_list}, file, sort_keys=False)
 
         # Other models
-        for name in self.stacs_model.keys():
+        for name in self.model_set:
             model_states = {key: item['default'] for key, item in self.stacs_model[name].items()}
             substrate_models.append(substrate_model(name, states=model_states))
 
@@ -364,7 +368,7 @@ class SimSTACS:
                 graph_models.append(graph_stream(name))
         
         # Populations are using the same name as the model name
-        for name, count in self.model_count.items():
+        for name, count in self.group_count.items():
             if name in self.input_model:
                 continue
             graph_models.append(graph_vertex(name, count))
@@ -487,14 +491,14 @@ class SimSTACS:
                         file.write(' ' + ' '.join(info) + '\n')
     
         # Index
-        local_index = {key: 0 for key in self.model_count.keys()}
+        local_index = {key: 0 for key in self.group_count.keys()}
         for fileidx in range(self.netfiles):
             fname = f"{self.netwkdir}/{self.filebase}.index.{fileidx}"
             with open(fname,"w") as file:
                 for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
-                    # print(' ' + ' '.join(str(index) for index in [n, self.model_index[self.node_data[n]['model']],
+                    # print(' ' + ' '.join(str(index) for index in [n, self.group_index[self.node_data[n]['model']],
                     #                                               local_index[self.node_data[n]['model']]]))
-                    file.write(' ' + ' '.join(str(index) for index in [n, self.model_index[self.node_data[n]['model']],
+                    file.write(' ' + ' '.join(str(index) for index in [n, self.group_index[self.node_data[n]['model']],
                                                                        local_index[self.node_data[n]['model']]]) + '\n')
                     local_index[self.node_data[n]['model']] += 1
             
