@@ -425,14 +425,14 @@ class Network:
         sub_build = cls.build
 
         @wraps(sub_build)
-        def recursive_build(self, *args, **kwargs_):
+        def wrapped_build(self, *args, **kwargs_):
             # run subclass build first
             sub_build(self, *args, **kwargs_)
             # base class recursive build
-            self._build()
+            self.recursive_build()
             return
 
-        cls.build = recursive_build
+        cls.build = wrapped_build
 
     # Expose the underlying Topology
     def __getattr__(self, name):
@@ -555,14 +555,14 @@ class Network:
 
     # Passthrough method for build
     def build(self):
-        self._build()
+        self.recursive_build()
 
     # Post build tasks (e.g. node lists)
     def finalize(self):
         pass
 
     # Incrementally and recursively build children, add connections, resolve dependencies
-    def _build(self):
+    def recursive_build(self):
         # Go through any previously uninitialized lists
         for name, value in self._emptylists.items():
             if not value:
