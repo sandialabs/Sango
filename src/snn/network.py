@@ -71,7 +71,8 @@ class Topology(SimpleNamespace):
         elif isinstance(name, int):
             return root[name]
         else:
-            print('error')
+            print(f"error accessing {root} {name}")
+            return
             
     # Traverse the path tree (for node lists)
     @staticmethod
@@ -86,13 +87,15 @@ class Topology(SimpleNamespace):
             elif isinstance(name, int):
                 return root.link[name]
             else:
-                print('error')
+                print(f"error accessing {root} {name}")
+                return
         elif isinstance(name, str):
             return getattr(root, name)
         elif isinstance(name, int):
             return root[name]
         else:
-            print('error')
+            print(f"error accessing {root} {name}")
+            return
     
     # Convert path string to list of attributes and indexes
     @staticmethod
@@ -115,11 +118,17 @@ class Topology(SimpleNamespace):
 
     # Helper function for traversing the path tree
     def access(self, path):
-        return reduce(self.traverse, self.expand_path(path), self)
+        resolved_path = reduce(self.traverse, self.expand_path(path), self)
+        if resolved_path is None:
+            print(f"error resolving path {path}")
+        return resolved_path
 
     # Helper function for traversing the path tree (for node lists)
     def access_node(self, path):
-        return reduce(self.traverse_node, self.expand_path(path), self)
+        resolved_path = reduce(self.traverse_node, self.expand_path(path), self)
+        if resolved_path is None:
+            print(f"error resolving path {path}")
+        return resolved_path
 
     # Temporary path if object doesn't exist
     def __getattr__(self, key):
@@ -503,13 +512,13 @@ class Network:
                 elif isinstance(name, int):
                     return root[name]
                 else:
-                    print('error')
+                    print(f"error accessing {root} {name}")
         elif isinstance(name, str):
             return getattr(root, name)
         elif isinstance(name, int):
             return root[name]
         else:
-            print('error')
+            print(f"error accessing {root} {name}")
     
     # Convert path string to list of attributes and indexes
     @staticmethod
@@ -532,7 +541,10 @@ class Network:
 
     # Helper function for traversing the path tree
     def access(self, path):
-        return reduce(self.traverse, self.expand_path(path), self)
+        resolved_path = reduce(self.traverse, self.expand_path(path), self)
+        if resolved_path is None:
+            print(f"error resolving path {path}")
+        return resolved_path
 
     # Traversing up the path tree to get full path
     def net_path(self):

@@ -368,14 +368,20 @@ class EdgeGroup(list):
             elif isinstance(root, NodePort):
                 return trace(root.link, index)
             else:
-                print('error')
+                print(f"error accessing {root} {index}")
                 return None
         
         # follow the links through ports
         self.path = path
         for i in range(len(self)):
             self[i].source_name = trace(self.source, self[i].source_index)
+            if self[i].source_name is None:
+                print(f"error at {self.path}: setting source path {self.source}")
+                return
             self[i].target_name = trace(self.target, self[i].target_index)
+            if self[i].target_name is None:
+                print(f"error at {self.path}: setting target path {self.target}")
+                return
 
 # Alias class pointing to set of (external) nodes (e.g. Network Inputs)
 class NodePort(list):
