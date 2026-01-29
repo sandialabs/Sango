@@ -26,11 +26,11 @@ class SimSTACS:
         self.timesteps = None
 
         # Model registry
-        self.model_registry = {'SI':  {'model_type': 5, 'type': 'stream'},
-                               'SC':  {'model_type': 6, 'type': 'edge'},
-                               'IN':  {'model_type': 7, 'type': 'vertex'},
-                               'LIF': {'model_type': 8, 'type': 'vertex'},
-                               'PSP': {'model_type': 9, 'type': 'edge'}}
+        self.model_registry = {'SI':  {'graph_type': 'stream', 'model_type': 'spike_input'},
+                               'SC':  {'graph_type': 'edge',   'model_type': 'spike_clamp'},
+                               'IN':  {'graph_type': 'vertex', 'model_type': 'simple_input'},
+                               'LIF': {'graph_type': 'vertex', 'model_type': 'simple_neuron'},
+                               'PSP': {'graph_type': 'edge',   'model_type': 'simple_synapse'}}
         
         # Conversion information between SNN-DSL models and STACS models
         self.stacs_model = {'LIF': {'v':        {'dsl': 'voltage',   'default': 0.0},
