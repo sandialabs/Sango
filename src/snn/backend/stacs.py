@@ -42,6 +42,7 @@ class SimSTACS:
                             'PSP': {'delay':    {'dsl': 'delay',     'default': 1.0, 'rep': 'tick'},
                                     'weight':   {'dsl': 'weight',    'default': 1.0}},
                             'IN':  {'I_clamp':  {'dsl': None,        'default': 0.0}},
+                            'SI':  {}, # no states
                             'SC':  {'delay':    {'dsl': 'delay',     'default': 1.0, 'rep': 'tick'}}}
         self.input_model = {'SI':  {'name': 'spike_input',
                                     'target': 'IN',
@@ -462,14 +463,19 @@ class SimSTACS:
                     stick_prefix[partidx+1] = stick_prefix[partidx]
                     for n in range(node_prefix[partidx], node_prefix[partidx+1]):
                         info = []
+                        # nodes
                         info.append(self.node_data[n]['model'])
-                        if self.node_data[n]['model'] in self.input_model:
-                            # no states
-                            pass
-                        else:
-                            for key, value in self.stacs_model[self.node_data[n]['model']].items():
-                                info.append(str(self.node_data[n][key]))
+                        state_info = []
+                        stick_info = []
+                        for key, value in self.stacs_model[self.node_data[n]['model']].items():
+                            if 'rep' in value and value['rep'] == 'tick':
+                                stick_info.append(f'{int(self.node_data[n][key])*self.ticks_per_ms:x}')
+                                stick_prefix[partidx+1] += 1
+                            else:
+                                state_info.append(str(self.node_data[n][key]))
                                 state_prefix[partidx+1] += 1
+                        info.extend(state_info + stick_info)
+                        # edges
                         for value in self.edge_data[n].values():
                             edge_prefix[partidx+1] += 1
                             if value is None:
