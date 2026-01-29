@@ -181,7 +181,7 @@ class SimSTACS:
         def substrate_model(model_name, params=None, states=None, ports=None):
             # Initialize model dictionary
             model_dict = dict()
-            model_dict['type'] = self.model_registry[model_name]['type']
+            model_dict['type'] = self.model_registry[model_name]['graph_type']
             model_dict['modname'] = model_name
             model_dict['modtype'] = self.model_registry[model_name]['model_type']
             
