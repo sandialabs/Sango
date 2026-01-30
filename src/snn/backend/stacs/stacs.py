@@ -123,7 +123,7 @@ class SimSTACS:
         self.node_data = [dict() for i in range(self.num_nodes)]
         self.edge_data = [dict() for i in range(self.num_nodes)] # this will be dict of dicts
         self.group_count = Counter()
-        self.model_set = set()
+        self.node_set = set()
         self.edge_set = set()
         
         # Add special spike_input node (stream)
@@ -144,7 +144,7 @@ class SimSTACS:
             self.node_map[node] = index
             self.node_data[index] = self.rekey_model(data)
             self.group_count.update([self.node_data[index]['model']])
-            self.model_set.add(self.node_data[index]['model'])
+            self.node_set.add(self.node_data[index]['model'])
             if self.has_input and data['model'] in input_targets:
                 source_index = self.node_map[self.input_model[input_source[data['model']]]['name']]
                 edge_model = self.input_model[input_source[data['model']]]['edge']
@@ -153,7 +153,6 @@ class SimSTACS:
                 self.edge_data[index][source_index] = {**model_name, **default_states}
                 self.edge_data[source_index][index] = None
                 self.edge_set.add((self.edge_data[index][source_index]['model'], self.node_data[source_index]['model'], self.node_data[index]['model']))
-                self.model_set.add(self.edge_data[index][source_index]['model'])
                 self.spike_input[index] = data['times']
                 
         # Get the model insertion order of our counter
@@ -165,7 +164,6 @@ class SimSTACS:
             t = self.node_map[target]
             self.edge_data[t][s] = self.rekey_model(data)
             self.edge_set.add((self.edge_data[t][s]['model'], self.node_data[s]['model'], self.node_data[t]['model']))
-            self.model_set.add(self.edge_data[t][s]['model'])
             if t not in self.edge_data[s]:
                 self.edge_data[s][t] = None
         
@@ -177,12 +175,12 @@ class SimSTACS:
     # Create the network directory for the dCSR files, and write the YAML files
     def write_yaml(self):
         # Returns a substrate model dictionary
-        def substrate_model(model_name, params=None, states=None, ports=None):
+        def substrate_model(model_name, model_type, params=None, states=None, ports=None):
             # Initialize model dictionary
             model_dict = dict()
-            model_dict['type'] = model_registry[model_name]['graph_type']
+            model_dict['type'] = model_registry[model_type]['graph_type']
             model_dict['modname'] = model_name
-            model_dict['modtype'] = model_registry[model_name]['model_type']
+            model_dict['modtype'] = model_registry[model_type]['model_type']
             
             # Parameters (shared by model instances)
             if params is not None:
@@ -198,8 +196,6 @@ class SimSTACS:
                         model_dict['state'].append({'name': k, **v})
                     else:
                         model_dict['state'].append({'name': k, 'init': 'constant', 'value': v})
-                    if k == 'delay':
-                        model_dict['state'][-1]['rep'] = 'tick'
             
             # Ports (for external communication)
             if ports is not None:
@@ -344,7 +340,7 @@ class SimSTACS:
             for name, value in self.input_model.items():
                 stream_param = {'n': self.group_count[value['target']]}
                 stream_port = {'input': self.input_model[name]['port']}
-                substrate_models.append(substrate_model(name, params=stream_param, ports=stream_port))
+                substrate_models.append(substrate_model(name, name, params=stream_param, ports=stream_port))
                 # Write the input files too
                 input_list = []
                 for times in self.spike_input.values():
@@ -353,10 +349,32 @@ class SimSTACS:
                 with open(fname,"w") as file:
                     yaml.dump({'spike_list': input_list}, file, sort_keys=False)
 
-        # Other models
-        for name in self.model_set:
-            model_states = {key: item['default'] for key, item in model_registry[name]['state'].items()}
-            substrate_models.append(substrate_model(name, states=model_states))
+        # Vertex models
+        for name in self.node_set:
+            model_states = dict()
+            for key, item in model_registry[name]['state'].items():
+                if item['dsl'] is None:
+                    model_states[key] = {'init': 'constant', 'value': item['default']}
+                else:
+                    model_states[key] = {'init': 'file', 'filetype': 'csv-dense',
+                                         'filename': f"files/{name}_{key}.csv"}
+                if 'rep' in item and item['rep'] == 'tick':
+                    model_states[key].update({'rep': 'tick'})
+            substrate_models.append(substrate_model(name, name, states=model_states))
+
+        # Edge models
+        for (name, source, target) in self.edge_set:
+            full_name = f"{name}_{source}_{target}"
+            model_states = dict()
+            for key, item in model_registry[name]['state'].items():
+                if item['dsl'] is None:
+                    model_states[key] = {'init': 'constant', 'value': item['default']}
+                else:
+                    model_states[key] = {'init': 'file', 'filetype': 'csv-sparse',
+                                         'filename': f"files/{full_name}_{key}.csv"}
+                if 'rep' in item and item['rep'] == 'tick':
+                    model_states[key].update({'rep': 'tick'})
+            substrate_models.append(substrate_model(full_name, name, states=model_states))
 
         # Network structure is parallelized through Charm++
         # and is also parameterized through a YAML configuration file
@@ -375,7 +393,9 @@ class SimSTACS:
         
         # Create the different network connections
         for edge_name, source_name, target_name in self.edge_set:
-            graph_models.append(graph_edge(source_name, target_name, edge_name))
+            full_name = f"{edge_name}_{source_name}_{target_name}"
+            model_conn = {'file': {'filetype': 'csv-dense', 'filename': f"files/{full_name}_delay.csv"}}
+            graph_models.append(graph_edge(source_name, target_name, full_name, connect=model_conn))
             
         # Generate the model file
         fname = f"{self.netwkdir}/{self.filebase}.model"
@@ -460,27 +480,27 @@ class SimSTACS:
                     edge_prefix[partidx+1] = edge_prefix[partidx]
                     state_prefix[partidx+1] = state_prefix[partidx]
                     stick_prefix[partidx+1] = stick_prefix[partidx]
-                    for n in range(node_prefix[partidx], node_prefix[partidx+1]):
+                    for target in range(node_prefix[partidx], node_prefix[partidx+1]):
                         info = []
                         # nodes
-                        info.append(self.node_data[n]['model'])
+                        info.append(self.node_data[target]['model'])
                         state_info = []
                         stick_info = []
-                        for key, value in model_registry[self.node_data[n]['model']]['state'].items():
+                        for key, value in model_registry[self.node_data[target]['model']]['state'].items():
                             if 'rep' in value and value['rep'] == 'tick':
-                                stick_info.append(f'{int(self.node_data[n][key])*self.ticks_per_ms:x}')
+                                stick_info.append(f'{int(self.node_data[target][key])*self.ticks_per_ms:x}')
                                 stick_prefix[partidx+1] += 1
                             else:
-                                state_info.append(str(self.node_data[n][key]))
+                                state_info.append(str(self.node_data[target][key]))
                                 state_prefix[partidx+1] += 1
                         info.extend(state_info + stick_info)
                         # edges
-                        for value in self.edge_data[n].values():
+                        for source, value in self.edge_data[target].items():
                             edge_prefix[partidx+1] += 1
                             if value is None:
                                 info.append('none')
                             else:
-                                info.append(value['model'])
+                                info.append(f"{value['model']}_{self.node_data[source]['model']}_{self.node_data[target]['model']}")
                                 # states then sticks
                                 state_info = []
                                 stick_info = []
