@@ -1,1 +1,1 @@
-from .stacs import SimSTACS
+from .stacs.stacs import SimSTACS

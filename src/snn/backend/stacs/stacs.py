@@ -1,10 +1,28 @@
 import os
+import sys
+from pathlib import Path
+import importlib.util
+
 import yaml
 import subprocess
 from collections import Counter
 
 import numpy as np
 import matplotlib.pyplot as plt
+
+# Dynamically import the model registry files
+model_registry = dict()
+def import_registry():
+    registry_dir = Path(__file__).resolve().parent / 'registry'
+    sys.path.insert(0, str(registry_dir.parent))
+    for file_path in registry_dir.glob("*.py"):
+        module_name = f"registry.{file_path.stem}"
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        model_registry.update(module.model_registry)
+    sys.path.pop(0)
+import_registry()
 
 # STACS Simulation Backend
 class SimSTACS:
@@ -25,25 +43,6 @@ class SimSTACS:
         self.ticks_per_ms = 1000000
         self.timesteps = None
 
-        # Model registry
-        self.model_registry = {'SI':  {'graph_type': 'stream', 'model_type': 'spike_input'},
-                               'SC':  {'graph_type': 'edge',   'model_type': 'spike_clamp'},
-                               'IN':  {'graph_type': 'vertex', 'model_type': 'simple_input'},
-                               'LIF': {'graph_type': 'vertex', 'model_type': 'simple_neuron'},
-                               'PSP': {'graph_type': 'edge',   'model_type': 'simple_synapse'}}
-        
-        # Conversion information between SNN-DSL models and STACS models
-        self.stacs_model = {'LIF': {'v':        {'dsl': 'voltage',   'default': 0.0},
-                                    'v_thresh': {'dsl': 'threshold', 'default': 1.0},
-                                    'v_reset':  {'dsl': 'reset',     'default': 0.0},
-                                    'v_bias':   {'dsl': 'bias',      'default': 0.0},
-                                    'v_leak':   {'dsl': 'leak',      'default': 1.0},
-                                    'I_syn':    {'dsl': None,        'default': 0.0}},
-                            'PSP': {'delay':    {'dsl': 'delay',     'default': 1.0, 'rep': 'tick'},
-                                    'weight':   {'dsl': 'weight',    'default': 1.0}},
-                            'IN':  {'I_clamp':  {'dsl': None,        'default': 0.0}},
-                            'SI':  {}, # no states
-                            'SC':  {'delay':    {'dsl': 'delay',     'default': 1.0, 'rep': 'tick'}}}
         self.input_model = {'SI':  {'name': 'spike_input',
                                     'target': 'IN',
                                     'edge': 'SC',
@@ -51,7 +50,7 @@ class SimSTACS:
     
     # Convert between dsl model to stacs model
     def rekey_model(self, data):
-        for key, value in self.stacs_model[data['model']].items():
+        for key, value in model_registry[data['model']]['state'].items():
             if value['dsl'] is not None:
                 data[key] = data.pop(value['dsl'])
             else:
@@ -150,7 +149,7 @@ class SimSTACS:
                 source_index = self.node_map[self.input_model[input_source[data['model']]]['name']]
                 edge_model = self.input_model[input_source[data['model']]]['edge']
                 model_name = {'model': edge_model}
-                default_states = {key: item['default'] for key, item in self.stacs_model[edge_model].items()}
+                default_states = {key: item['default'] for key, item in model_registry[edge_model]['state'].items()}
                 self.edge_data[index][source_index] = {**model_name, **default_states}
                 self.edge_data[source_index][index] = None
                 self.edge_set.add((self.edge_data[index][source_index]['model'], self.node_data[source_index]['model'], self.node_data[index]['model']))
@@ -181,9 +180,9 @@ class SimSTACS:
         def substrate_model(model_name, params=None, states=None, ports=None):
             # Initialize model dictionary
             model_dict = dict()
-            model_dict['type'] = self.model_registry[model_name]['graph_type']
+            model_dict['type'] = model_registry[model_name]['graph_type']
             model_dict['modname'] = model_name
-            model_dict['modtype'] = self.model_registry[model_name]['model_type']
+            model_dict['modtype'] = model_registry[model_name]['model_type']
             
             # Parameters (shared by model instances)
             if params is not None:
@@ -356,7 +355,7 @@ class SimSTACS:
 
         # Other models
         for name in self.model_set:
-            model_states = {key: item['default'] for key, item in self.stacs_model[name].items()}
+            model_states = {key: item['default'] for key, item in model_registry[name]['state'].items()}
             substrate_models.append(substrate_model(name, states=model_states))
 
         # Network structure is parallelized through Charm++
@@ -467,7 +466,7 @@ class SimSTACS:
                         info.append(self.node_data[n]['model'])
                         state_info = []
                         stick_info = []
-                        for key, value in self.stacs_model[self.node_data[n]['model']].items():
+                        for key, value in model_registry[self.node_data[n]['model']]['state'].items():
                             if 'rep' in value and value['rep'] == 'tick':
                                 stick_info.append(f'{int(self.node_data[n][key])*self.ticks_per_ms:x}')
                                 stick_prefix[partidx+1] += 1
@@ -485,7 +484,7 @@ class SimSTACS:
                                 # states then sticks
                                 state_info = []
                                 stick_info = []
-                                for key, item in self.stacs_model[value['model']].items():
+                                for key, item in model_registry[value['model']]['state'].items():
                                     if 'rep' in item and item['rep'] == 'tick':
                                         stick_info.append(f'{int(value[key])*self.ticks_per_ms:x}')
                                         stick_prefix[partidx+1] += 1
@@ -616,7 +615,7 @@ class SimSTACS:
 
     # Plotting as event plot
     def plot_spikes(self, figsize=(8,6), linelengths=0.8, linewidths=1.0,
-                    color_dict={'LIF': 'tab:blue', 'IN': 'tab:orange', 'SI': 'tab:green'}):
+                    color_dict={'LIF': 'C0', 'IN': 'C1', 'SI': 'C2'}):
         if self.spike_list is None:
             self.read_spikes()
             
@@ -628,6 +627,8 @@ class SimSTACS:
             color_dict = {key: f"C{i%10}" for i, key in enumerate(self.vertex_modname)}
         event_color = []
         for index, modname in enumerate(self.vertex_modname):
+            if modname not in color_dict:
+                color_dict[modname] = f"C{len(color_dict)%10}"
             event_color.extend([color_dict[modname]] * self.vertex_order[index])
         # colored lines (for legend)
         for key in color_dict.keys():
