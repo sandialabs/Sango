@@ -6,6 +6,7 @@ import importlib.util
 import yaml
 import subprocess
 from collections import Counter
+from contextlib import ExitStack
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -57,21 +58,24 @@ class SimSTACS:
                 data[key] = value['default']
         return data
 
-    def compile(self, netparts=1, netfiles=1, input=True, prefix='./dslnet', debug=False):
+    def compile(self, netparts=1, netfiles=1, input=True, prefix='./dslnet',
+                write_fileinit=False, debug=False):
         self.netparts = netparts
         self.netfiles = netfiles
         self.has_input = input
         self.netwkdir = prefix
+        self.fileinit = write_fileinit
         self.debug = debug
 
         # Convert network to stacs
         self.to_stacs()
         self.write_yaml()
-        #self.write_files()
+        if self.fileinit:
+            self.write_file()
         self.write_dcsr()
 
     # Run the network
-    def run(self, timesteps=10.0, runmode=None, num_pe=None, stacsdir='~/stacs', verbose=False):
+    def run(self, timesteps=10.0, num_pe=None, runmode=None, stacsdir='~/stacs', verbose=False):
         # Path to STACS executables
         self.stacsdir = stacsdir
         self.charmrun = f"{self.stacsdir}/charmrun"
@@ -120,9 +124,10 @@ class SimSTACS:
         self.num_edges = 0 # undirected edges (computed later)
         
         self.node_map = dict()
-        self.node_data = [dict() for i in range(self.num_nodes)]
-        self.edge_data = [dict() for i in range(self.num_nodes)] # this will be dict of dicts
+        self.node_data = [dict() for _ in range(self.num_nodes)]
+        self.edge_data = [dict() for _ in range(self.num_nodes)] # this will be dict of dicts
         self.group_count = Counter()
+        self.local_index = [0 for _ in range(self.num_nodes)]
         self.node_set = set()
         self.edge_set = set()
         
@@ -135,6 +140,7 @@ class SimSTACS:
                 self.node_map[value['name']] = n
                 self.node_data[n] = {'model': name}
                 self.group_count.update([name])
+                self.local_index[n] = self.group_count[name] - 1
                 input_targets.append(value['target'])
                 input_source[value['target']] = name
         
@@ -144,6 +150,7 @@ class SimSTACS:
             self.node_map[node] = index
             self.node_data[index] = self.rekey_model(data)
             self.group_count.update([self.node_data[index]['model']])
+            self.local_index[index] = self.group_count[self.node_data[index]['model']] - 1
             self.node_set.add(self.node_data[index]['model'])
             if self.has_input and data['model'] in input_targets:
                 source_index = self.node_map[self.input_model[input_source[data['model']]]['name']]
@@ -305,6 +312,7 @@ class SimSTACS:
             conf_dict.setdefault('plastic', True)
             conf_dict.setdefault('episodic', False)
             conf_dict.setdefault('loadbal', False)
+            conf_dict.setdefault('selfconn', True)
         
             # Network partitions
             conf_dict.update(part_conf)
@@ -394,7 +402,7 @@ class SimSTACS:
         # Create the different network connections
         for edge_name, source_name, target_name in self.edge_set:
             full_name = f"{edge_name}_{source_name}_{target_name}"
-            model_conn = {'file': {'filetype': 'csv-dense', 'filename': f"files/{full_name}_delay.csv"}}
+            model_conn = {'file': {'filetype': 'csv-sparse', 'filename': f"files/{full_name}_delay.csv"}}
             graph_models.append(graph_edge(source_name, target_name, full_name, connect=model_conn))
             
         # Generate the model file
@@ -516,16 +524,14 @@ class SimSTACS:
                         file.write(' ' + ' '.join(info) + '\n')
     
         # Index
-        local_index = {key: 0 for key in self.group_count.keys()}
         for fileidx in range(self.netfiles):
             fname = f"{self.netwkdir}/{self.filebase}.index.{fileidx}"
             with open(fname,"w") as file:
                 for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
                     # print(' ' + ' '.join(str(index) for index in [n, self.group_index[self.node_data[n]['model']],
-                    #                                               local_index[self.node_data[n]['model']]]))
+                    #                                               self.local_index[n]]))
                     file.write(' ' + ' '.join(str(index) for index in [n, self.group_index[self.node_data[n]['model']],
-                                                                       local_index[self.node_data[n]['model']]]) + '\n')
-                    local_index[self.node_data[n]['model']] += 1
+                                                                       self.local_index[n]]) + '\n')
             
         # Coord
         for fileidx in range(self.netfiles):
@@ -563,7 +569,52 @@ class SimSTACS:
         
     # Write the topology out to input files (for building)
     def write_file(self):
-        pass
+        # Vertex models
+        for name in self.node_set:
+            filename = dict()
+            file = dict()
+            # Filenames for each state
+            for key, item in model_registry[name]['state'].items():
+                if item['dsl'] is not None:
+                    filename[key] = f"{self.netwkdir}/files/{name}_{key}.csv"
+            if not filename:
+                continue
+            # Open files per state
+            with ExitStack() as stack:
+                for key, fname in filename.items():
+                    file[key] = stack.enter_context(open(fname, 'w'))
+                # Loop over node data (somewhat inefficient)
+                for data in self.node_data:
+                    if data['model'] == name:
+                        for key in file.keys():
+                            file[key].write(f"{data[key]}\n")
+
+        # Edge models
+        for (edge_name, source_name, target_name) in self.edge_set:
+            full_name = f"{edge_name}_{source_name}_{target_name}"
+            filename = dict()
+            file = dict()
+            # Filenames for each state
+            for key, item in model_registry[edge_name]['state'].items():
+                if item['dsl'] is not None:
+                    filename[key] = f"{self.netwkdir}/files/{full_name}_{key}.csv"
+            if not filename:
+                continue
+            # Open files per state
+            with ExitStack() as stack:
+                for key, fname in filename.items():
+                    file[key] = stack.enter_context(open(fname, 'w'))
+                # Loop over edge data (even more inefficient)
+                for target, value in enumerate(self.edge_data):
+                    if self.node_data[target]['model'] == target_name:
+                        for source, data in value.items():
+                            if (data is not None and
+                                data['model'] == edge_name and
+                                self.node_data[source]['model'] == source_name):
+                                for key in file.keys():
+                                    file[key].write(f"{self.local_index[source]}:{data[key]},")
+                        for key in file.keys():
+                            file[key].write('\n')
 
     # Collect any output from the simulation
     def read_spikes(self):
