@@ -52,7 +52,7 @@ class Topology(SimpleNamespace):
         # unnamed edgegroups
         self.edgegroups = list()
 
-    # Not really used anymore
+    # Recursively add topology attributes
     @staticmethod
     def map_entry(entry):
         if isinstance(entry, dict):
