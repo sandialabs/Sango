@@ -560,12 +560,12 @@ class Network:
         return self._graph
 
     # Passthrough method for build
-    def build(self, return_graph=True):
+    def build(self, generate_graph=True):
         self.recursive_build()
 
         # Optionally generate networkx graph
-        if return_graph:
-            return self.graph(update=True)
+        if generate_graph:
+            self.graph(update=True)
 
     # Post build tasks (e.g. node lists)
     def finalize(self):
