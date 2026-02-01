@@ -215,7 +215,7 @@ class SimBrian:
             return self.spike_list
     
     def plot_spikes(self, figsize=(8,6), linelengths=0.8, linewidths=1.0,
-                    color_dict={'LIF': 'C0', 'IN': 'C1', 'SI': 'C2'}):
+                    color_dict={'LIF': 'C0', 'IN': 'C1'}):
         if self.spike_list is None:
             self.read_spikes()
             
