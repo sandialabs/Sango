@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 import importlib.util
 
+import time
 import yaml
 import subprocess
 from collections import Counter
@@ -68,11 +69,16 @@ class SimSTACS:
         self.debug = debug
 
         # Convert network to stacs
+        start_time = time.perf_counter()
         self.to_stacs()
         self.write_yaml()
         if self.fileinit:
             self.write_file()
         self.write_dcsr()
+        end_time = time.perf_counter()
+        self.compile_time = end_time - start_time
+        if self.debug:
+            print(f"Compile time: {self.compile_time}")
 
     # Run the network
     def run(self, timesteps=10.0, num_pe=None, runmode=None, stacsdir='~/stacs', verbose=False):
@@ -105,6 +111,7 @@ class SimSTACS:
             yaml.dump(config_yaml,file,sort_keys=False)
 
         # Call STACS
+        start_time = time.perf_counter()
         runlist = runcmd.split()
         if runmode is not None:
             runlist.append(runmode)
@@ -112,6 +119,10 @@ class SimSTACS:
             subprocess.run(runlist)
         else:
             subprocess.run(runlist, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        end_time = time.perf_counter()
+        self.run_time = end_time - start_time
+        if self.verbose:
+            print(f"Run time: {self.run_time}")
 
     # Convert the network topology to STACS
     def to_stacs(self):

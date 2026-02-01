@@ -7,7 +7,9 @@ import brian2
 from brian2 import NeuronGroup, Synapses, SpikeGeneratorGroup, SpikeMonitor
 from brian2 import ms, defaultclock
 
+import time
 from collections import Counter
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -46,13 +48,25 @@ class SimBrian:
     def compile(self, debug=False):
         self.debug = debug
         
-        # Convert network to stacs
+        # Convert network to brian
+        start_time = time.perf_counter()
         self.to_brian()
+        end_time = time.perf_counter()
+        self.compile_time = end_time - start_time
+        if self.debug:
+            print(f"Compile time: {self.compile_time}")
         
-    def run(self, timesteps=10.0):
+    def run(self, timesteps=10.0, verbose=False):
         self.timesteps = timesteps*self.tstep
+        self.verbose = verbose
+
         # Run network
+        start_time = time.perf_counter()
         self.brian_net.run(self.timesteps)
+        end_time = time.perf_counter()
+        self.run_time = end_time - start_time
+        if self.verbose:
+            print(f"Run time: {self.run_time}")
 
     def to_brian(self):
         # Get a flattened graph object
@@ -149,7 +163,7 @@ class SimBrian:
                                                        threshold=model_registry[name]['threshold'],
                                                        reset=model_registry[name]['reset'],
                                                        method=model_registry[name]['method'],
-                                                       events=model_registry[name]['events'])
+                                                       events=dict(model_registry[name]['events']))
                 # These "run regularly" methods bypass the standard Brian integration step
                 if 'run_regularly' in model_registry[name]:
                     for program in model_registry[name]['run_regularly']:
