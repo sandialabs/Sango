@@ -12,20 +12,6 @@ from contextlib import ExitStack
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Dynamically import the model registry files
-model_registry = dict()
-def import_registry():
-    registry_dir = Path(__file__).resolve().parent / 'registry'
-    sys.path.insert(0, str(registry_dir.parent))
-    for file_path in registry_dir.glob("*.py"):
-        module_name = f"registry.{file_path.stem}"
-        spec = importlib.util.spec_from_file_location(module_name, file_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        model_registry.update(module.model_registry)
-    sys.path.pop(0)
-import_registry()
-
 # STACS Simulation Backend
 class SimSTACS:
     def __init__(self, net):
@@ -49,10 +35,25 @@ class SimSTACS:
                                     'target': 'IN',
                                     'edge': 'SC',
                                     'port': 'input/spike_input.yml'}}
+        self.model_registry = self.import_registry()
+
+    # Dynamically import the model registry files
+    def import_registry(self):
+        registry = dict()
+        registry_dir = Path(__file__).resolve().parent / 'registry'
+        sys.path.insert(0, str(registry_dir.parent))
+        for file_path in registry_dir.glob("*.py"):
+            module_name = f"registry.{file_path.stem}"
+            spec = importlib.util.spec_from_file_location(module_name, file_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            registry.update(module.model_registry)
+        sys.path.pop(0)
+        return registry
     
     # Convert between dsl model to stacs model
     def rekey_model(self, data):
-        for key, value in model_registry[data['model']]['state'].items():
+        for key, value in self.model_registry[data['model']]['state'].items():
             if value['dsl'] is not None:
                 data[key] = data.pop(value['dsl'])
             else:
@@ -130,7 +131,8 @@ class SimSTACS:
         stacs_network = self.net._topology.to_nx()
         
         # Convert to SNN-dCSR
-        self.num_streams = len(self.input_model)
+        if self.has_input:
+            self.num_streams = len(self.input_model)
         self.num_nodes = stacs_network.number_of_nodes() + self.num_streams
         self.num_edges = 0 # undirected edges (computed later)
         
@@ -167,7 +169,7 @@ class SimSTACS:
                 source_index = self.node_map[self.input_model[input_source[data['model']]]['name']]
                 edge_model = self.input_model[input_source[data['model']]]['edge']
                 model_name = {'model': edge_model}
-                default_states = {key: item['default'] for key, item in model_registry[edge_model]['state'].items()}
+                default_states = {key: item['default'] for key, item in self.model_registry[edge_model]['state'].items()}
                 self.edge_data[index][source_index] = {**model_name, **default_states}
                 self.edge_data[source_index][index] = None
                 self.edge_set.add((self.edge_data[index][source_index]['model'], self.node_data[source_index]['model'], self.node_data[index]['model']))
@@ -196,9 +198,9 @@ class SimSTACS:
         def substrate_model(model_name, model_type, params=None, states=None, ports=None):
             # Initialize model dictionary
             model_dict = dict()
-            model_dict['type'] = model_registry[model_type]['graph_type']
+            model_dict['type'] = self.model_registry[model_type]['graph_type']
             model_dict['modname'] = model_name
-            model_dict['modtype'] = model_registry[model_type]['model_type']
+            model_dict['modtype'] = self.model_registry[model_type]['model_type']
             
             # Parameters (shared by model instances)
             if params is not None:
@@ -371,7 +373,7 @@ class SimSTACS:
         # Vertex models
         for name in self.node_set:
             model_states = dict()
-            for key, item in model_registry[name]['state'].items():
+            for key, item in self.model_registry[name]['state'].items():
                 if item['dsl'] is None:
                     model_states[key] = {'init': 'constant', 'value': item['default']}
                 else:
@@ -385,7 +387,7 @@ class SimSTACS:
         for (name, source, target) in self.edge_set:
             full_name = f"{name}_{source}_{target}"
             model_states = dict()
-            for key, item in model_registry[name]['state'].items():
+            for key, item in self.model_registry[name]['state'].items():
                 if item['dsl'] is None:
                     model_states[key] = {'init': 'constant', 'value': item['default']}
                 else:
@@ -505,7 +507,7 @@ class SimSTACS:
                         info.append(self.node_data[target]['model'])
                         state_info = []
                         stick_info = []
-                        for key, value in model_registry[self.node_data[target]['model']]['state'].items():
+                        for key, value in self.model_registry[self.node_data[target]['model']]['state'].items():
                             if 'rep' in value and value['rep'] == 'tick':
                                 stick_info.append(f'{int(self.node_data[target][key])*self.ticks_per_ms:x}')
                                 stick_prefix[partidx+1] += 1
@@ -523,7 +525,7 @@ class SimSTACS:
                                 # states then sticks
                                 state_info = []
                                 stick_info = []
-                                for key, item in model_registry[value['model']]['state'].items():
+                                for key, item in self.model_registry[value['model']]['state'].items():
                                     if 'rep' in item and item['rep'] == 'tick':
                                         stick_info.append(f'{int(value[key])*self.ticks_per_ms:x}')
                                         stick_prefix[partidx+1] += 1
@@ -585,7 +587,7 @@ class SimSTACS:
             filename = dict()
             file = dict()
             # Filenames for each state
-            for key, item in model_registry[name]['state'].items():
+            for key, item in self.model_registry[name]['state'].items():
                 if item['dsl'] is not None:
                     filename[key] = f"{self.netwkdir}/files/{name}_{key}.csv"
             if not filename:
@@ -606,7 +608,7 @@ class SimSTACS:
             filename = dict()
             file = dict()
             # Filenames for each state
-            for key, item in model_registry[edge_name]['state'].items():
+            for key, item in self.model_registry[edge_name]['state'].items():
                 if item['dsl'] is not None:
                     filename[key] = f"{self.netwkdir}/files/{full_name}_{key}.csv"
             if not filename:
@@ -697,7 +699,7 @@ class SimSTACS:
 
     # Plotting as event plot
     def plot_spikes(self, figsize=(8,6), linelengths=0.8, linewidths=1.0,
-                    color_dict={'LIF': 'C0', 'IN': 'C1', 'SI': 'C2'}):
+                    color_dict={'LIF': 'C0', 'IN': 'C1'}):
         if self.spike_list is None:
             self.read_spikes()
             

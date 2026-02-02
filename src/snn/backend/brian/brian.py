@@ -13,20 +13,6 @@ from collections import Counter
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Dynamically import the model registry files
-model_registry = dict()
-def import_registry():
-    registry_dir = Path(__file__).resolve().parent / 'registry'
-    sys.path.insert(0, str(registry_dir.parent))
-    for file_path in registry_dir.glob("*.py"):
-        module_name = f"registry.{file_path.stem}"
-        spec = importlib.util.spec_from_file_location(module_name, file_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        model_registry.update(module.model_registry)
-    sys.path.pop(0)
-import_registry()
-
 # Brian Simulation Backend
 class SimBrian:
     def __init__(self, dsl_net):
@@ -35,10 +21,26 @@ class SimBrian:
         self.timesteps = None
 
         self.spike_list = None
+    
+        self.model_registry = self.import_registry()
+
+    # Dynamically import the model registry files
+    def import_registry(self):
+        registry = dict()
+        registry_dir = Path(__file__).resolve().parent / 'registry'
+        sys.path.insert(0, str(registry_dir.parent))
+        for file_path in registry_dir.glob("*.py"):
+            module_name = f"registry.{file_path.stem}"
+            spec = importlib.util.spec_from_file_location(module_name, file_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            registry.update(module.model_registry)
+        sys.path.pop(0)
+        return registry
         
     # Convert between dsl model to brian2 model
     def rekey_model(self, data):
-        for key, value in model_registry[data['model']]['state'].items():
+        for key, value in self.model_registry[data['model']]['state'].items():
             if value['dsl'] is not None:
                 data[key] = data.pop(value['dsl'])
             else:
@@ -89,7 +91,7 @@ class SimBrian:
             self.node_data[n] = self.rekey_model(data)
             self.group_count.update([self.node_data[n]['model']])
             self.local_index[n] = self.group_count[self.node_data[n]['model']] - 1
-            if model_registry[self.node_data[n]['model']]['graph_type'] == 'input':
+            if self.model_registry[self.node_data[n]['model']]['graph_type'] == 'input':
                 self.spike_input.append(data['times'])
         
         # Global edge data
@@ -100,19 +102,22 @@ class SimBrian:
             self.edge_set.add((self.edge_data[s][t]['model'], self.node_data[s]['model'], self.node_data[t]['model']))
             
         # Spike generator inputs (sorted)
-        spike_index = []
-        spike_times = []
-        for i, times in enumerate(self.spike_input):
-            for t in times:
-                spike_index.append(i)
-                spike_times.append(t*ms)
-        self.spikegen_times, self.spikegen_index = [list(t) for t in zip(*sorted(zip(spike_times, spike_index)))]
+        if not self.spike_input:
+            pass
+        else:
+            spike_index = []
+            spike_times = []
+            for i, times in enumerate(self.spike_input):
+                for t in times:
+                    spike_index.append(i)
+                    spike_times.append(t*ms)
+            self.spikegen_times, self.spikegen_index = [list(t) for t in zip(*sorted(zip(spike_times, spike_index)))]
         
         # Container for local neuron states (by group)
         self.neuron_states = dict()
         for name in self.group_count.keys():
             self.neuron_states[name] = dict()
-            for state in model_registry[name]['state']:
+            for state in self.model_registry[name]['state']:
                 self.neuron_states[name][state] = []
 
         # Container for local synapse states (by connection)
@@ -121,13 +126,13 @@ class SimBrian:
         for name, source, target in self.edge_set:
             full_name = f"{name}_{source}_{target}"
             self.synapse_states[full_name] = dict()
-            for state in model_registry[name]['state']:
+            for state in self.model_registry[name]['state']:
                 self.synapse_states[full_name][state] = []
         
         # Neurons
         for n, data in enumerate(self.node_data):
             name = data['model']
-            for state in model_registry[name]['state']:
+            for state in self.model_registry[name]['state']:
                 self.neuron_states[name][state].append(data[state])
         
         # Synapses
@@ -136,7 +141,7 @@ class SimBrian:
                 full_name = f"{data['model']}_{self.node_data[s]['model']}_{self.node_data[t]['model']}"
                 self.synapse_connections[full_name]['i'].append(self.local_index[s])
                 self.synapse_connections[full_name]['j'].append(self.local_index[t])
-                for state in model_registry[data['model']]['state']:
+                for state in self.model_registry[data['model']]['state']:
                     if state == 'delay':
                         # Brian has a default delay of 0ms (to get to the next timestep)
                         self.synapse_states[full_name]['delay'].append((data['delay']-1.0)*ms)
@@ -153,48 +158,48 @@ class SimBrian:
         # Create input and neuron groups (and their spike monitors)
         for name, count in self.group_count.items():
             # Spike generator group
-            if model_registry[name]['graph_type'] == 'input':
+            if self.model_registry[name]['graph_type'] == 'input':
                 self.input_groups[name] = SpikeGeneratorGroup(count, self.spikegen_index,
                                                               self.spikegen_times, sorted=True)
                 self.spike_monitors[name] = SpikeMonitor(self.input_groups[name])
             # Regular neuron model group
-            elif model_registry[name]['graph_type'] == 'neuron':
-                self.neuron_groups[name] = NeuronGroup(count, model=model_registry[name]['model_eqs'],
-                                                       threshold=model_registry[name]['threshold'],
-                                                       reset=model_registry[name]['reset'],
-                                                       method=model_registry[name]['method'],
-                                                       events=dict(model_registry[name]['events']))
+            elif self.model_registry[name]['graph_type'] == 'neuron':
+                self.neuron_groups[name] = NeuronGroup(count, model=self.model_registry[name]['model_eqs'],
+                                                       threshold=self.model_registry[name]['threshold'],
+                                                       reset=self.model_registry[name]['reset'],
+                                                       method=self.model_registry[name]['method'],
+                                                       events=dict(self.model_registry[name]['events']))
                 # These "run regularly" methods bypass the standard Brian integration step
-                if 'run_regularly' in model_registry[name]:
-                    for program in model_registry[name]['run_regularly']:
+                if 'run_regularly' in self.model_registry[name]:
+                    for program in self.model_registry[name]['run_regularly']:
                         self.neuron_groups[name].run_regularly(program['eqs'], when=program['when'])
                 # These "run on event" methods trigger when a custom event happens
-                if 'run_on_event' in model_registry[name]:
-                    for program in model_registry[name]['run_on_event']:
+                if 'run_on_event' in self.model_registry[name]:
+                    for program in self.model_registry[name]['run_on_event']:
                         self.neuron_groups[name].run_on_event(program['event'], program['eqs'])
                 # Copy over states
-                for state in model_registry[name]['state']:
+                for state in self.model_registry[name]['state']:
                     getattr(self.neuron_groups[name], f"{state}")[:] = self.neuron_states[name][state]
                 self.spike_monitors[name] = SpikeMonitor(self.neuron_groups[name])
         
         # Create synapse groups
         for (name, source, target) in self.edge_set:
             full_name = f"{name}_{source}_{target}"
-            if model_registry[source]['graph_type'] == 'input':
+            if self.model_registry[source]['graph_type'] == 'input':
                 self.synapse_groups[full_name] = Synapses(self.input_groups[source],
                                                           self.neuron_groups[target],
-                                                          model=model_registry[name]['model_eqs'],
-                                                          on_pre=model_registry[name]['on_pre'])
+                                                          model=self.model_registry[name]['model_eqs'],
+                                                          on_pre=self.model_registry[name]['on_pre'])
             else:
                 self.synapse_groups[full_name] = Synapses(self.neuron_groups[source],
                                                           self.neuron_groups[target],
-                                                          model=model_registry[name]['model_eqs'],
-                                                          on_pre=model_registry[name]['on_pre'])
+                                                          model=self.model_registry[name]['model_eqs'],
+                                                          on_pre=self.model_registry[name]['on_pre'])
             # Copy over connections
             self.synapse_groups[full_name].connect(i=self.synapse_connections[full_name]['i'],
                                                    j=self.synapse_connections[full_name]['j'])
             # Copy over states
-            for state in model_registry[name]['state']:
+            for state in self.model_registry[name]['state']:
                 getattr(self.synapse_groups[full_name], f"{state}")[:,:] = self.synapse_states[full_name][state]
         
         # Add all the objects to the network
