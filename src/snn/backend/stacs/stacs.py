@@ -161,7 +161,7 @@ class SimSTACS:
         if self.has_input:
             for n, (name, value) in enumerate(self.input_model.items()):
                 self.node_map[value['name']] = n
-                self.node_data[n] = {'model': name}
+                self.node_data[n] = {'model': name, 'group_name': name}
                 self.group_count.update([name])
                 self.local_index[n] = self.group_count[name] - 1
                 input_targets.append(value['target'])
@@ -175,12 +175,13 @@ class SimSTACS:
             group_param = self.rekey_param(data)
             if group_param not in self.node_set[self.node_data[index]['model']]:
                 self.node_set[self.node_data[index]['model']][group_param] = len(self.node_set[self.node_data[index]['model']])
-            # Preparing parameterized groups
-            #group_name = f"{self.node_data[index]['model']}_{self.node_set[self.node_data[index]['model']][group_param]}"
-            #self.node_data[index]['group_name'] = group_name
-            #self.group_count.update([group_name])
-            self.group_count.update([self.node_data[index]['model']])
-            self.local_index[index] = self.group_count[self.node_data[index]['model']] - 1
+            if self.node_set[self.node_data[index]['model']][group_param] == 0:
+                group_name = f"{self.node_data[index]['model']}"
+            else:
+                group_name = f"{self.node_data[index]['model']}_{self.node_set[self.node_data[index]['model']][group_param]}"
+            self.node_data[index]['group_name'] = group_name
+            self.group_count.update([group_name])
+            self.local_index[index] = self.group_count[group_name] - 1
             if self.has_input and data['model'] in input_targets:
                 source_index = self.node_map[self.input_model[input_source[data['model']]]['name']]
                 edge_model = self.input_model[input_source[data['model']]]['edge']
@@ -188,7 +189,9 @@ class SimSTACS:
                 default_states = {key: item['default'] for key, item in self.model_registry[edge_model]['state'].items()}
                 self.edge_data[index][source_index] = {**model_name, **default_states}
                 self.edge_data[source_index][index] = None
-                self.edge_set[(self.edge_data[index][source_index]['model'], self.node_data[source_index]['model'], self.node_data[index]['model'])][None] = 0
+                self.edge_set[(self.edge_data[index][source_index]['model'], self.node_data[source_index]['group_name'], self.node_data[index]['group_name'])][None] = 0
+                edge_name = f"{self.edge_data[index][source_index]['model']}_{self.node_data[source_index]['group_name']}_{self.node_data[index]['group_name']}"
+                self.edge_data[index][source_index]['group_name'] = edge_name
                 self.spike_input[index] = data['times']
                 
         # Get the model insertion order of our counter
@@ -199,10 +202,16 @@ class SimSTACS:
             s = self.node_map[source]
             t = self.node_map[target]
             self.edge_data[t][s] = self.rekey_model(data)
+            edge_tuple = (self.edge_data[t][s]['model'], self.node_data[s]['group_name'], self.node_data[t]['group_name'])
             group_param = self.rekey_param(data)
-            edge_tuple = (self.edge_data[t][s]['model'], self.node_data[s]['model'], self.node_data[t]['model'])
             if group_param not in self.edge_set[edge_tuple]:
                 self.edge_set[edge_tuple][group_param] = len(self.edge_set[edge_tuple])
+            edge_name = f"{self.edge_data[t][s]['model']}_{self.node_data[s]['group_name']}_{self.node_data[t]['group_name']}"
+            if self.edge_set[edge_tuple][group_param] == 0:
+                group_name = edge_name
+            else:
+                group_name = f"{edge_name}__{self.edge_set[edge_tuple][group_param]}"
+            self.edge_data[t][s]['group_name'] = group_name
             if t not in self.edge_data[s]:
                 self.edge_data[s][t] = None
         
@@ -393,7 +402,11 @@ class SimSTACS:
         for name, groups in self.node_set.items():
             model_params = dict()
             model_states = dict()
-            for group in groups.keys(): # currently only supports one group
+            for group, g in groups.items(): # currently only supports one group
+                if g == 0:
+                    group_name = name
+                else:
+                    group_name = f"{name}_{g}"
                 for k, key in enumerate(self.model_registry[name]['param'].keys()):
                     model_params[key] = group[k]
                 for key, item in self.model_registry[name]['state'].items():
@@ -404,14 +417,18 @@ class SimSTACS:
                                              'filename': f"files/{name}_{key}.csv"}
                     if 'rep' in item and item['rep'] == 'tick':
                         model_states[key].update({'rep': 'tick'})
-                substrate_models.append(substrate_model(name, name, params=model_params, states=model_states))
+                substrate_models.append(substrate_model(group_name, name, params=model_params, states=model_states))
 
         # Edge models
         for (name, source, target), groups in self.edge_set.items():
             full_name = f"{name}_{source}_{target}"
             model_params = dict()
             model_states = dict()
-            for group in groups.keys(): # currently only supports one group
+            for group, g in groups.items(): # currently only supports one group
+                if g == 0:
+                    group_name = full_name
+                else:
+                    group_name = f"{full_name}__{g}"
                 for k, key in enumerate(self.model_registry[name]['param'].keys()):
                     model_params[key] = group[k]
                 for key, item in self.model_registry[name]['state'].items():
@@ -419,10 +436,10 @@ class SimSTACS:
                         model_states[key] = {'init': 'constant', 'value': item['default']}
                     else:
                         model_states[key] = {'init': 'file', 'filetype': 'csv-sparse',
-                                             'filename': f"files/{full_name}_{key}.csv"}
+                                             'filename': f"files/{group_name}_{key}.csv"}
                     if 'rep' in item and item['rep'] == 'tick':
                         model_states[key].update({'rep': 'tick'})
-                substrate_models.append(substrate_model(full_name, name, params=model_params, states=model_states))
+                substrate_models.append(substrate_model(group_name, name, params=model_params, states=model_states))
 
         # Network structure is parallelized through Charm++
         # and is also parameterized through a YAML configuration file
@@ -440,10 +457,15 @@ class SimSTACS:
             graph_models.append(graph_vertex(name, count))
         
         # Create the different network connections
-        for edge_name, source_name, target_name in self.edge_set:
+        for (edge_name, source_name, target_name), groups in self.edge_set.items():
             full_name = f"{edge_name}_{source_name}_{target_name}"
-            model_conn = {'file': {'filetype': 'csv-sparse', 'filename': f"files/{full_name}_delay.csv"}}
-            graph_models.append(graph_edge(source_name, target_name, full_name, connect=model_conn))
+            for group, g in groups.items():
+                if g == 0:
+                    group_name = full_name
+                else:
+                    group_name = f"{full_name}__{g}"
+                model_conn = {'file': {'filetype': 'csv-sparse', 'filename': f"files/{group_name}_delay.csv"}}
+                graph_models.append(graph_edge(source_name, target_name, group_name, connect=model_conn))
             
         # Generate the model file
         fname = f"{self.netwkdir}/{self.filebase}.model"
@@ -531,7 +553,8 @@ class SimSTACS:
                     for target in range(node_prefix[partidx], node_prefix[partidx+1]):
                         info = []
                         # nodes
-                        info.append(self.node_data[target]['model'])
+                        #info.append(self.node_data[target]['model'])
+                        info.append(self.node_data[target]['group_name'])
                         state_info = []
                         stick_info = []
                         for key, value in self.model_registry[self.node_data[target]['model']]['state'].items():
@@ -548,7 +571,8 @@ class SimSTACS:
                             if value is None:
                                 info.append('none')
                             else:
-                                info.append(f"{value['model']}_{self.node_data[source]['model']}_{self.node_data[target]['model']}")
+                                #info.append(f"{value['model']}_{self.node_data[source]['model']}_{self.node_data[target]['model']}")
+                                info.append(f"{value['group_name']}")
                                 # states then sticks
                                 state_info = []
                                 stick_info = []
@@ -570,7 +594,7 @@ class SimSTACS:
                 for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
                     # print(' ' + ' '.join(str(index) for index in [n, self.group_index[self.node_data[n]['model']],
                     #                                               self.local_index[n]]))
-                    file.write(' ' + ' '.join(str(index) for index in [n, self.group_index[self.node_data[n]['model']],
+                    file.write(' ' + ' '.join(str(index) for index in [n, self.group_index[self.node_data[n]['group_name']],
                                                                        self.local_index[n]]) + '\n')
             
         # Coord
@@ -610,51 +634,73 @@ class SimSTACS:
     # Write the topology out to input files (for building)
     def write_file(self):
         # Vertex models
-        for name in self.node_set.keys():
+        for name, groups in self.node_set.items():
             filename = dict()
             file = dict()
-            # Filenames for each state
-            for key, item in self.model_registry[name]['state'].items():
-                if item['dsl'] is not None:
-                    filename[key] = f"{self.netwkdir}/files/{name}_{key}.csv"
-            if not filename:
-                continue
-            # Open files per state
-            with ExitStack() as stack:
-                for key, fname in filename.items():
-                    file[key] = stack.enter_context(open(fname, 'w'))
-                # Loop over node data (somewhat inefficient)
-                for data in self.node_data:
-                    if data['model'] == name:
-                        for key in file.keys():
-                            file[key].write(f"{data[key]}\n")
+            for group, g in groups.items():
+                if g == 0:
+                    group_name = name
+                else:
+                    group_name = f"{name}_{g}"
+                # Filenames for each state
+                for key, item in self.model_registry[name]['state'].items():
+                    if item['dsl'] is not None:
+                        filename[key] = f"{self.netwkdir}/files/{group_name}_{key}.csv"
+                if not filename:
+                    continue
+                # Open files per state
+                with ExitStack() as stack:
+                    for key, fname in filename.items():
+                        file[key] = stack.enter_context(open(fname, 'w'))
+                    # Loop over node data (somewhat inefficient)
+                    for data in self.node_data:
+                        if data['group_name'] == group_name:
+                            for key in file.keys():
+                                file[key].write(f"{data[key]}\n")
 
         # Edge models
-        for (edge_name, source_name, target_name) in self.edge_set.keys():
+
+        for (name, source, target), groups in self.edge_set.items():
+            full_name = f"{name}_{source}_{target}"
+            model_params = dict()
+            model_states = dict()
+            for group, g in groups.items(): # currently only supports one group
+                if g == 0:
+                    group_name = full_name
+                else:
+                    group_name = f"{full_name}__{g}"
+
+        
+        for (edge_name, source_name, target_name), groups in self.edge_set.items():
             full_name = f"{edge_name}_{source_name}_{target_name}"
             filename = dict()
             file = dict()
-            # Filenames for each state
-            for key, item in self.model_registry[edge_name]['state'].items():
-                if item['dsl'] is not None:
-                    filename[key] = f"{self.netwkdir}/files/{full_name}_{key}.csv"
-            if not filename:
-                continue
-            # Open files per state
-            with ExitStack() as stack:
-                for key, fname in filename.items():
-                    file[key] = stack.enter_context(open(fname, 'w'))
-                # Loop over edge data (even more inefficient)
-                for target, value in enumerate(self.edge_data):
-                    if self.node_data[target]['model'] == target_name:
-                        for source, data in value.items():
-                            if (data is not None and
-                                data['model'] == edge_name and
-                                self.node_data[source]['model'] == source_name):
-                                for key in file.keys():
-                                    file[key].write(f"{self.local_index[source]}:{data[key]},")
-                        for key in file.keys():
-                            file[key].write('\n')
+            for group, g in groups.items():
+                if g == 0:
+                    group_name = full_name
+                else:
+                    group_name = f"{full_name}__{g}"
+                # Filenames for each state
+                for key, item in self.model_registry[edge_name]['state'].items():
+                    if item['dsl'] is not None:
+                        filename[key] = f"{self.netwkdir}/files/{group_name}_{key}.csv"
+                if not filename:
+                    continue
+                # Open files per state
+                with ExitStack() as stack:
+                    for key, fname in filename.items():
+                        file[key] = stack.enter_context(open(fname, 'w'))
+                    # Loop over edge data (even more inefficient)
+                    for target, value in enumerate(self.edge_data):
+                        if self.node_data[target]['group_name'] == target_name:
+                            for source, data in value.items():
+                                if (data is not None and
+                                    data['group_name'] == group_name and
+                                    self.node_data[source]['group_name'] == source_name):
+                                    for key in file.keys():
+                                        file[key].write(f"{self.local_index[source]}:{data[key]},")
+                            for key in file.keys():
+                                file[key].write('\n')
 
     # Collect any output from the simulation
     def read_spikes(self):
