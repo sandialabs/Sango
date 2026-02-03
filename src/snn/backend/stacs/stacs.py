@@ -6,7 +6,7 @@ import importlib.util
 import time
 import yaml
 import subprocess
-from collections import Counter
+from collections import Counter, defaultdict
 from contextlib import ExitStack
 
 import numpy as np
@@ -50,7 +50,17 @@ class SimSTACS:
             registry.update(module.model_registry)
         sys.path.pop(0)
         return registry
-    
+
+    # Convert between dsl model to stacs model parameters
+    def rekey_param(self, data):
+        param = []
+        for key, value in self.model_registry[data['model']]['param'].items():
+            if value['dsl'] is not None:
+                param.append(data[value['dsl']][0])
+            else:
+                param.append(value['default'])
+        return tuple(param)
+
     # Convert between dsl model to stacs model
     def rekey_model(self, data):
         for key, value in self.model_registry[data['model']]['state'].items():
@@ -141,8 +151,8 @@ class SimSTACS:
         self.edge_data = [dict() for _ in range(self.num_nodes)] # this will be dict of dicts
         self.group_count = Counter()
         self.local_index = [0 for _ in range(self.num_nodes)]
-        self.node_set = set()
-        self.edge_set = set()
+        self.node_set = defaultdict(dict)
+        self.edge_set = defaultdict(dict)
         
         # Add special spike_input node (stream)
         input_targets = []
@@ -162,9 +172,15 @@ class SimSTACS:
             index = n + self.num_streams
             self.node_map[node] = index
             self.node_data[index] = self.rekey_model(data)
+            group_param = self.rekey_param(data)
+            if group_param not in self.node_set[self.node_data[index]['model']]:
+                self.node_set[self.node_data[index]['model']][group_param] = len(self.node_set[self.node_data[index]['model']])
+            # Preparing parameterized groups
+            #group_name = f"{self.node_data[index]['model']}_{self.node_set[self.node_data[index]['model']][group_param]}"
+            #self.node_data[index]['group_name'] = group_name
+            #self.group_count.update([group_name])
             self.group_count.update([self.node_data[index]['model']])
             self.local_index[index] = self.group_count[self.node_data[index]['model']] - 1
-            self.node_set.add(self.node_data[index]['model'])
             if self.has_input and data['model'] in input_targets:
                 source_index = self.node_map[self.input_model[input_source[data['model']]]['name']]
                 edge_model = self.input_model[input_source[data['model']]]['edge']
@@ -172,7 +188,7 @@ class SimSTACS:
                 default_states = {key: item['default'] for key, item in self.model_registry[edge_model]['state'].items()}
                 self.edge_data[index][source_index] = {**model_name, **default_states}
                 self.edge_data[source_index][index] = None
-                self.edge_set.add((self.edge_data[index][source_index]['model'], self.node_data[source_index]['model'], self.node_data[index]['model']))
+                self.edge_set[(self.edge_data[index][source_index]['model'], self.node_data[source_index]['model'], self.node_data[index]['model'])][None] = 0
                 self.spike_input[index] = data['times']
                 
         # Get the model insertion order of our counter
@@ -183,7 +199,10 @@ class SimSTACS:
             s = self.node_map[source]
             t = self.node_map[target]
             self.edge_data[t][s] = self.rekey_model(data)
-            self.edge_set.add((self.edge_data[t][s]['model'], self.node_data[s]['model'], self.node_data[t]['model']))
+            group_param = self.rekey_param(data)
+            edge_tuple = (self.edge_data[t][s]['model'], self.node_data[s]['model'], self.node_data[t]['model'])
+            if group_param not in self.edge_set[edge_tuple]:
+                self.edge_set[edge_tuple][group_param] = len(self.edge_set[edge_tuple])
             if t not in self.edge_data[s]:
                 self.edge_data[s][t] = None
         
@@ -371,31 +390,39 @@ class SimSTACS:
                     yaml.dump({'spike_list': input_list}, file, sort_keys=False)
 
         # Vertex models
-        for name in self.node_set:
+        for name, groups in self.node_set.items():
+            model_params = dict()
             model_states = dict()
-            for key, item in self.model_registry[name]['state'].items():
-                if item['dsl'] is None:
-                    model_states[key] = {'init': 'constant', 'value': item['default']}
-                else:
-                    model_states[key] = {'init': 'file', 'filetype': 'csv-dense',
-                                         'filename': f"files/{name}_{key}.csv"}
-                if 'rep' in item and item['rep'] == 'tick':
-                    model_states[key].update({'rep': 'tick'})
-            substrate_models.append(substrate_model(name, name, states=model_states))
+            for group in groups.keys(): # currently only supports one group
+                for k, key in enumerate(self.model_registry[name]['param'].keys()):
+                    model_params[key] = group[k]
+                for key, item in self.model_registry[name]['state'].items():
+                    if item['dsl'] is None:
+                        model_states[key] = {'init': 'constant', 'value': item['default']}
+                    else:
+                        model_states[key] = {'init': 'file', 'filetype': 'csv-dense',
+                                             'filename': f"files/{name}_{key}.csv"}
+                    if 'rep' in item and item['rep'] == 'tick':
+                        model_states[key].update({'rep': 'tick'})
+                substrate_models.append(substrate_model(name, name, params=model_params, states=model_states))
 
         # Edge models
-        for (name, source, target) in self.edge_set:
+        for (name, source, target), groups in self.edge_set.items():
             full_name = f"{name}_{source}_{target}"
+            model_params = dict()
             model_states = dict()
-            for key, item in self.model_registry[name]['state'].items():
-                if item['dsl'] is None:
-                    model_states[key] = {'init': 'constant', 'value': item['default']}
-                else:
-                    model_states[key] = {'init': 'file', 'filetype': 'csv-sparse',
-                                         'filename': f"files/{full_name}_{key}.csv"}
-                if 'rep' in item and item['rep'] == 'tick':
-                    model_states[key].update({'rep': 'tick'})
-            substrate_models.append(substrate_model(full_name, name, states=model_states))
+            for group in groups.keys(): # currently only supports one group
+                for k, key in enumerate(self.model_registry[name]['param'].keys()):
+                    model_params[key] = group[k]
+                for key, item in self.model_registry[name]['state'].items():
+                    if item['dsl'] is None:
+                        model_states[key] = {'init': 'constant', 'value': item['default']}
+                    else:
+                        model_states[key] = {'init': 'file', 'filetype': 'csv-sparse',
+                                             'filename': f"files/{full_name}_{key}.csv"}
+                    if 'rep' in item and item['rep'] == 'tick':
+                        model_states[key].update({'rep': 'tick'})
+                substrate_models.append(substrate_model(full_name, name, params=model_params, states=model_states))
 
         # Network structure is parallelized through Charm++
         # and is also parameterized through a YAML configuration file
@@ -583,7 +610,7 @@ class SimSTACS:
     # Write the topology out to input files (for building)
     def write_file(self):
         # Vertex models
-        for name in self.node_set:
+        for name in self.node_set.keys():
             filename = dict()
             file = dict()
             # Filenames for each state
@@ -603,7 +630,7 @@ class SimSTACS:
                             file[key].write(f"{data[key]}\n")
 
         # Edge models
-        for (edge_name, source_name, target_name) in self.edge_set:
+        for (edge_name, source_name, target_name) in self.edge_set.keys():
             full_name = f"{edge_name}_{source_name}_{target_name}"
             filename = dict()
             file = dict()
