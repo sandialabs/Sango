@@ -56,7 +56,7 @@ class SimSTACS:
         param = []
         for key, value in self.model_registry[data['model']]['param'].items():
             if value['dsl'] is not None:
-                param.append(data[value['dsl']][0])
+                param.append(data.pop(value['dsl'])[0])
             else:
                 param.append(value['default'])
         return tuple(param)
