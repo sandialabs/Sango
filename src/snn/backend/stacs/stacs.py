@@ -537,7 +537,10 @@ class SimSTACS:
             with open(fname,"w") as file:
                 for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
                     #print(' ' + ' '.join(str(key) for key in self.edge_data[n]))
-                    file.write(' ' + ' '.join(str(key) for key in self.edge_data[n]) + '\n')
+                    if self.edge_data[n]:
+                        file.write(' ' + ' '.join(str(key) for key in self.edge_data[n]) + '\n')
+                    else:
+                        file.write('\n')
     
         # State
         edge_prefix = [0 for _ in range(self.netparts + 1)]
