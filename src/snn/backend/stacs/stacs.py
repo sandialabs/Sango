@@ -775,7 +775,7 @@ class SimSTACS:
 
     # Plotting as event plot
     def plot_spikes(self, figsize=(8,6), linelengths=0.8, linewidths=1.0,
-                    color_dict={'LIF': 'C0', 'IN': 'C1'}):
+                    color_dict={'LIF': 'C0', 'IN': 'C1'}, tick_names=False):
         if self.spike_list is None:
             self.read_spikes()
             
@@ -797,6 +797,10 @@ class SimSTACS:
         # The spike raster is plotted using eventplot
         plt.eventplot(self.spike_list, colors=event_color, lineoffsets=1,
                       linelengths=linelengths, linewidths=linewidths)
+
+        # Tick names (may be too crowded with many neurons)
+        if tick_names:
+            plt.yticks(list(self.node_map.values()), list(self.node_map.keys()))
         
         plt.title('Spike Raster')
         plt.xlabel('Time (ms)')
