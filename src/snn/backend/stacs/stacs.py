@@ -27,6 +27,7 @@ class SimSTACS:
         self.netfiles = 1
         
         self.spike_list = None
+        self.record_points = None
         
         self.ticks_per_ms = 1000000
         self.timesteps = None
@@ -401,13 +402,13 @@ class SimSTACS:
                                 group_name = name
                             else:
                                 group_name = f"{name}_{g}"
-                        # the use of tfreq/period can be confusing, but it's
-                        # supposed to be the time interval between measurements
-                        # for now, the state should be the backend-mapped name
-                        probe_dict = {'tfreq': probe['period'],
-                                      'modname': group_name,
-                                      'state': probe['state']}
-                        record_dict['probes'].append(probe_dict)
+                            # the use of tfreq/period can be confusing, but it's
+                            # supposed to be the time interval between measurements
+                            # for now, the state should be the backend-mapped name
+                            probe_dict = {'tfreq': probe['period'],
+                                          'modname': group_name,
+                                          'state': probe['state']}
+                            record_dict['probes'].append(probe_dict)
                 # Check across edges
                 for (name, source, target), groups in self.edge_set.items():
                     if probe['name'] == name:
@@ -417,10 +418,10 @@ class SimSTACS:
                                 group_name = full_name
                             else:
                                 group_name = f"{full_name}__{g}"
-                        probe_dict = {'tfreq': probe['period'],
-                                      'modname': group_name,
-                                      'state': probe['state']}
-                        record_dict['probes'].append(probe_dict)
+                            probe_dict = {'tfreq': probe['period'],
+                                          'modname': group_name,
+                                          'state': probe['state']}
+                            record_dict['probes'].append(probe_dict)
             substrate_models.append(record_dict)
         
         # Stream models
@@ -743,13 +744,23 @@ class SimSTACS:
                             for key in file.keys():
                                 file[key].write('\n')
 
-    # Collect any spike events from the simulation
-    def read_spikes(self):
+    # Read prerequisite configuration information for event logs and records
+    def read_prereqs(self):
         # Load main configuration file
         fname = f"{self.netwkdir}/{self.filebase}.yml"
         with open(fname,"r") as file:
             conf_yaml = yaml.safe_load(file)
+        
+        # Reading in data from event logs, which are stored
+        # by recording interval in simulation iterations
+        record_interval = int(conf_yaml['trecord']/conf_yaml['tstep'])
+        record_max = int(conf_yaml['tmax']/conf_yaml['tstep'])
+        self.record_points = list(range(record_interval, record_max, record_interval))+[record_max]
 
+        # Read in netfiles/netparts again (for standalone analysis)
+        self.netfiles = conf_yaml['netfiles']
+        self.netparts = conf_yaml['netparts']
+        
         # Calculate some information from the graph file
         fname = f"{self.netwkdir}/{self.filebase}.graph"
         with open(fname,"r") as file:
@@ -771,23 +782,30 @@ class SimSTACS:
         # Because the neuron models are potentially distributed over multiple
         # partitions, we need to find the reindexing mapping for cleaner plotting
         self.vertex_remap = np.zeros(self.vertex_prefix[-1]).astype(int)
-        for fileidx in range(conf_yaml['netfiles']):
+        for fileidx in range(self.netfiles):
             fname = f"{self.netwkdir}/{self.filebase}.index.{fileidx}"
             with open(fname, 'r') as findex:
                 for line in findex:
                     global_index, group_index, local_index = line.split()
                     self.vertex_remap[int(global_index)] = self.vertex_prefix[int(group_index)] + int(local_index)
         
-        # Reading in data from event logs, which are stored 
-        # by recording interval in simulation iterations
-        record_interval = int(conf_yaml['trecord']/conf_yaml['tstep'])
-        record_max = int(conf_yaml['tmax']/conf_yaml['tstep'])
-        self.record_points = list(range(record_interval, record_max, record_interval))+[record_max]
+        # Vertex distribution information
+        fname = f"{self.netwkdir}/{self.filebase}.dist"
+        self.vertex_dist = []
+        with open(fname,"r") as file:
+            for line in file:
+                dist = line.split()
+                self.vertex_dist.append(int(dist[0]))
+
+    # Collect any spike events from the simulation
+    def read_spikes(self):
+        # Read prerequisite configuration information
+        self.read_prereqs()
 
         # Read the record files and collect spikes into an event list
         self.spike_list = [[] for _ in range(self.vertex_prefix[-1])]
         for record in self.record_points:
-            for fileidx in range(conf_yaml['netfiles']):
+            for fileidx in range(self.netfiles):
                 fname = f"{self.netwkdir}/{self.recordir}/{self.filebase}.evtlog.{record}.{fileidx}"
                 with open(fname, 'r') as file:
                     for line in file:
@@ -806,25 +824,10 @@ class SimSTACS:
 
     # Collect any probes from the simulation (no remapping)
     def read_records(self):
-        print('Reading records is currently an experimental feature, indexes have not been remapped')
-        # Load main configuration file
-        fname = f"{self.netwkdir}/{self.filebase}.yml"
-        with open(fname,"r") as file:
-            conf_yaml = yaml.safe_load(file)
-
-        # Vertex distribution information
-        fname = f"{self.netwkdir}/{self.filebase}.dist"
-        vertex_dist = []
-        with open(fname,"r") as file:
-            for line in file:
-                dist = line.split()
-                vertex_dist.append(int(dist[0]))
-        
-        # Reading in data from record files, which are stored
-        # by recording interval in simulation iterations
-        record_interval = int(conf_yaml['trecord']/conf_yaml['tstep'])
-        record_max = int(conf_yaml['tmax']/conf_yaml['tstep'])
-        self.record_points = list(range(record_interval, record_max, record_interval))+[record_max]
+        print('Reading records is currently an experimental feature')
+        # Read prereqs if not already
+        if self.record_points is None:
+            self.read_prereqs()
         
         # Records information
         self.record_list = list()
@@ -839,6 +842,16 @@ class SimSTACS:
                                                  'name': probe['modname'].split('_')[0],
                                                  'state': probe['state'],
                                                  'period': probe['tfreq']})
+        
+        # Adjacency information for getting global indexes from edges
+        adjcy = []
+        for fileidx in range(self.netfiles):
+            fname = f"{self.netwkdir}/{self.filebase}.adjcy.{fileidx}"
+            with open(fname, 'r') as file:
+                for line in file:
+                    data = line.split()
+                    adjcy.append([int(index) for index in data])
+        
         # Read in the records from files
         header_offset = 5
         num_records = len(self.record_list)
@@ -866,9 +879,16 @@ class SimSTACS:
                         # parse the header (first line in first record file, timestep = 0)
                         if (timestamp == 0 and num_idx > 0):
                             for index in range(num_idx//2):
-                                global_index = vertex_dist[partidx] + int(data[header_offset+2*index])
+                                global_index = self.vertex_dist[partidx] + int(data[header_offset+2*index])
                                 edge_index = int(data[header_offset+2*index+1]) # 1 offset (0 is vertex)
-                                self.record_index[record_id][global_index].append(edge_index) # target major
+                                if edge_index > 0:
+                                    # the edge index requires the non-remapped adjcy first
+                                    global_edge_index = self.vertex_remap[adjcy[global_index][edge_index-1]]
+                                else:
+                                    global_edge_index = -1
+                                # remap the node after
+                                global_index = self.vertex_remap[global_index]
+                                self.record_index[record_id][global_index].append(global_edge_index) # target major
                         # remaining lines are the data points
                         else:
                             for value in range(num_real):
