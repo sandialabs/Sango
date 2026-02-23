@@ -36,6 +36,8 @@ class SimSTACS:
                                     'edge': 'SC',
                                     'port': 'input/spike_input.yml'}}
         self.model_registry = self.import_registry()
+        self.record_dict = {'events': ['spike'],
+                            'probes': []}
 
     # Dynamically import the model registry files
     def import_registry(self):
@@ -317,7 +319,7 @@ class SimSTACS:
         # Reorganize the list of model dictionaries
         def generate_model_yaml(substrate_models):
             # Reorder models in stream, vertex, edge order
-            sort_key = {'stream': 0, 'vertex': 1, 'edge': 2}
+            sort_key = {'record': -1, 'stream': 0, 'vertex': 1, 'edge': 2}
             substrate_list = sorted(substrate_models,
                                     key = lambda x: sort_key[x['type']])
             
@@ -383,6 +385,43 @@ class SimSTACS:
         # Neuron and synapse dynamics are written in C++
         # but are parameterized through a YAML configuration file
         substrate_models = []
+
+        # Recording information
+        if self.record_dict:
+            record_dict = {'type': 'record',
+                           'events': self.record_dict['events'],
+                           'probes': []}
+            # duplicate probe information for model variations
+            for probe in self.record_dict['probes']:
+                # Check across nodes
+                for name, groups in self.node_set.items():
+                    if probe['name'] == name:
+                        for group, g in groups.items():
+                            if g == 0:
+                                group_name = name
+                            else:
+                                group_name = f"{name}_{g}"
+                        # the use of tfreq/period can be confusing, but it's
+                        # supposed to be the time interval between measurements
+                        # for now, the state should be the backend-mapped name
+                        probe_dict = {'tfreq': probe['period'],
+                                      'modname': group_name,
+                                      'state': probe['state']}
+                        record_dict['probes'].append(probe_dict)
+                # Check across edges
+                for (name, source, target), groups in self.edge_set.items():
+                    if probe['name'] == name:
+                        full_name = f"{name}_{source}_{target}"
+                        for group, g in groups.items():
+                            if g == 0:
+                                group_name = full_name
+                            else:
+                                group_name = f"{full_name}__{g}"
+                        probe_dict = {'tfreq': probe['period'],
+                                      'modname': group_name,
+                                      'state': probe['state']}
+                        record_dict['probes'].append(probe_dict)
+            substrate_models.append(record_dict)
         
         # Stream models
         if self.has_input:
@@ -402,7 +441,7 @@ class SimSTACS:
         for name, groups in self.node_set.items():
             model_params = dict()
             model_states = dict()
-            for group, g in groups.items(): # currently only supports one group
+            for group, g in groups.items():
                 if g == 0:
                     group_name = name
                 else:
@@ -424,7 +463,7 @@ class SimSTACS:
             full_name = f"{name}_{source}_{target}"
             model_params = dict()
             model_states = dict()
-            for group, g in groups.items(): # currently only supports one group
+            for group, g in groups.items():
                 if g == 0:
                     group_name = full_name
                 else:
@@ -662,7 +701,6 @@ class SimSTACS:
                                 file[key].write(f"{data[key]}\n")
 
         # Edge models
-
         for (name, source, target), groups in self.edge_set.items():
             full_name = f"{name}_{source}_{target}"
             model_params = dict()
@@ -705,7 +743,7 @@ class SimSTACS:
                             for key in file.keys():
                                 file[key].write('\n')
 
-    # Collect any output from the simulation
+    # Collect any spike events from the simulation
     def read_spikes(self):
         # Load main configuration file
         fname = f"{self.netwkdir}/{self.filebase}.yml"
@@ -765,6 +803,81 @@ class SimSTACS:
                             self.spike_list[index].append(timestamp)
 
         return self.spike_list
+
+    # Collect any probes from the simulation (no remapping)
+    def read_records(self):
+        print('Reading records is currently an experimental feature, indexes have not been remapped')
+        # Load main configuration file
+        fname = f"{self.netwkdir}/{self.filebase}.yml"
+        with open(fname,"r") as file:
+            conf_yaml = yaml.safe_load(file)
+
+        # Vertex distribution information
+        fname = f"{self.netwkdir}/{self.filebase}.dist"
+        vertex_dist = []
+        with open(fname,"r") as file:
+            for line in file:
+                dist = line.split()
+                vertex_dist.append(int(dist[0]))
+        
+        # Reading in data from record files, which are stored
+        # by recording interval in simulation iterations
+        record_interval = int(conf_yaml['trecord']/conf_yaml['tstep'])
+        record_max = int(conf_yaml['tmax']/conf_yaml['tstep'])
+        self.record_points = list(range(record_interval, record_max, record_interval))+[record_max]
+        
+        # Records information
+        self.record_list = list()
+        fname = f"{self.netwkdir}/{self.filebase}.model"
+        with open(fname,"r") as file:
+            conf_model = yaml.safe_load_all(file)
+            for model in conf_model:
+                if model['type'] == 'record' and 'probes' in model:
+                    for probe in model['probes']:
+                        self.record_list.append({'record_id': len(self.record_list),
+                                                 'full_name': probe['modname'],
+                                                 'name': probe['modname'].split('_')[0],
+                                                 'state': probe['state'],
+                                                 'period': probe['tfreq']})
+        # Read in the records from files
+        header_offset = 5
+        num_records = len(self.record_list)
+        self.record_index = [defaultdict(list) for _ in range(num_records)]
+        self.record_data = [defaultdict(list) for _ in range(num_records)]
+        for record in self.record_points:
+            partidx = 0 # stored per partition
+            prev_timestamp = 0 # for bookkeeping
+            for fileidx in range(self.netfiles):
+                fname = f"{self.netwkdir}/{self.recordir}/{self.filebase}.record.{record}.{fileidx}"
+                with open(fname, 'r') as file:
+                    for line in file:
+                        # record id, timestamp, real-valued, tick-valued, integer-valued
+                        data = line.split()
+                        record_id = int(data[0])
+                        timestamp = float(int(data[1], 16)) / self.ticks_per_ms
+                        # only 1 of num_real/tick/idx should be nonzero
+                        num_real = int(data[2])
+                        num_tick = int(data[3])
+                        num_idx = int(data[4])
+                        # Some partition-based bookkeeping
+                        if (timestamp < prev_timestamp):
+                            partidx += 1
+                        prev_timestamp = timestamp
+                        # parse the header (first line in first record file, timestep = 0)
+                        if (timestamp == 0 and num_idx > 0):
+                            for index in range(num_idx//2):
+                                global_index = vertex_dist[partidx] + int(data[header_offset+2*index])
+                                edge_index = int(data[header_offset+2*index+1]) # 1 offset (0 is vertex)
+                                self.record_index[record_id][global_index].append(edge_index) # target major
+                        # remaining lines are the data points
+                        else:
+                            for value in range(num_real):
+                                self.record_data[record_id][timestamp].append(float(data[header_offset+value]))
+                            for value in range(num_tick):
+                                self.record_data[record_id][timestamp].append(float(int(data[header_offset+value], 16)) / self.ticks_per_ms)
+        
+        # Return the relevant data structures
+        return self.record_list, self.record_index, self.record_data
 
     # Return spikes as event list
     def get_spikes(self):
