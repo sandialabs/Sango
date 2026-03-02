@@ -22,6 +22,7 @@ class SimSTACS:
         
         self.netwkdir = './dslnet'
         self.filebase = 'network'
+        self.file_ext = ''
         self.recordir = 'record'
         self.netparts = 1
         self.netfiles = 1
@@ -39,6 +40,13 @@ class SimSTACS:
         self.model_registry = self.import_registry()
         self.record_dict = {'events': ['spike'],
                             'probes': []}
+        
+        # Main simulation configuration
+        self.sim_conf = {'runmode': 'simulate',
+                         'randseed': 1421}
+        
+        # Timing configuration
+        self.time_conf = {'tmax': self.timesteps} # ms
 
     # Dynamically import the model registry files
     def import_registry(self):
@@ -521,24 +529,18 @@ class SimSTACS:
             graph_yaml = generate_graph_yaml(graph_models)
             yaml.dump(graph_yaml, file, sort_keys=False)
 
-        # Generate main configuration
-        sim_conf = {'runmode': 'simulate',
-                    'randseed': 1421}
-        
         # Partitions
         part_conf = {'netwkdir': self.netwkdir,
                      'recordir': self.recordir,
                      'filebase': self.filebase,
+                     'fileload': self.file_ext,
                      'netfiles': self.netfiles,
                      'netparts': self.netparts}
-        
-        # Timing
-        time_conf = {'tmax': self.timesteps} # ms
         
         # Generate the simulation configuration file
         fname = f"{self.netwkdir}/{self.filebase}.yml"
         with open(fname,"w") as file:
-            conf_yaml = generate_conf_yaml(sim_conf, part_conf, time_conf)
+            conf_yaml = generate_conf_yaml(self.sim_conf, part_conf, self.time_conf)
             yaml.dump(conf_yaml, file, sort_keys=False)
 
     # Write the topology out to dCSR
@@ -744,6 +746,16 @@ class SimSTACS:
                             for key in file.keys():
                                 file[key].write('\n')
 
+    # Rename output files to base SNN-dCSR (by default)
+    def rename_checkpoint(self, replacement='', extension='.out'):
+        for src in Path(self.netwkdir).iterdir():
+            if not src.is_file():
+                continue
+            if extension not in src.name:
+                continue
+            dst = src.with_name(src.name.replace(extension, replacement))
+            src.replace(dst)
+
     # Read prerequisite configuration information for event logs and records
     def read_prereqs(self):
         # Load main configuration file
@@ -806,7 +818,7 @@ class SimSTACS:
         self.spike_list = [[] for _ in range(self.vertex_prefix[-1])]
         for record in self.record_points:
             for fileidx in range(self.netfiles):
-                fname = f"{self.netwkdir}/{self.recordir}/{self.filebase}.evtlog.{record}.{fileidx}"
+                fname = f"{self.netwkdir}/{self.recordir}/{self.filebase}{self.file_ext}.evtlog.{record}.{fileidx}"
                 with open(fname, 'r') as file:
                     for line in file:
                         # the event format is [event type, timestamp, vertex index, optional payload]
@@ -861,7 +873,7 @@ class SimSTACS:
             partidx = 0 # stored per partition
             prev_timestamp = 0 # for bookkeeping
             for fileidx in range(self.netfiles):
-                fname = f"{self.netwkdir}/{self.recordir}/{self.filebase}.record.{record}.{fileidx}"
+                fname = f"{self.netwkdir}/{self.recordir}/{self.filebase}{self.file_ext}.record.{record}.{fileidx}"
                 with open(fname, 'r') as file:
                     for line in file:
                         # record id, timestamp, real-valued, tick-valued, integer-valued
