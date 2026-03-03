@@ -756,6 +756,33 @@ class SimSTACS:
             dst = src.with_name(src.name.replace(extension, replacement))
             src.replace(dst)
 
+    # Update parameters in the node/edge sets (experimental)
+    # Note: this updates across all models with the same name
+    def update_param(self, model, param, value):
+        param_index = list(self.model_registry[model]['param']).index(param)
+        # Loop over node sets
+        for name, groups in self.node_set.items():
+            if name == model:
+                for old_param in list(groups.keys()):
+                    g = groups[old_param]
+                    param_list = list(old_param)
+                    param_list[param_index] = value
+                    new_param = tuple(param_list)
+                    groups[new_param] = g
+                    if new_param != old_param:
+                        del groups[old_param]
+        # Loop over edge sets
+        for (edge_name, source_name, target_name), groups in self.edge_set.items():
+            if edge_name == model:
+                for old_param in list(groups.keys()):
+                    g = groups[old_param]
+                    param_list = list(old_param)
+                    param_list[param_index] = value
+                    new_param = tuple(param_list)
+                    groups[new_param] = g
+                    if new_param != old_param:
+                        del groups[old_param]
+
     # Read prerequisite configuration information for event logs and records
     def read_prereqs(self):
         # Load main configuration file
