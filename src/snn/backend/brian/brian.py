@@ -20,6 +20,7 @@ class SimBrian:
         self.tstep = 1.0*ms
         self.timesteps = None
 
+        self.node_map = None
         self.spike_list = None
     
         self.model_registry = self.import_registry()
@@ -77,7 +78,7 @@ class SimBrian:
 
         # Convert to Brian2 network objects
         self.num_nodes = self.dsl_graph.number_of_nodes()
-        self.node_map = dict()
+        self.node_index = dict()
         self.node_data = [dict() for _ in range(self.num_nodes)]
         self.edge_data = [dict() for _ in range(self.num_nodes)]
         self.group_count = Counter()
@@ -85,19 +86,33 @@ class SimBrian:
         self.edge_set = set()
         self.spike_input = []
         
+        # Add input model (IN) to the beginning of the group
+        self.group_count['IN'] = 0
+
         # Global node data
         for n, (node, data) in enumerate(self.dsl_graph.nodes(data=True)):
-            self.node_map[node] = n
+            self.node_index[node] = n
             self.node_data[n] = self.rekey_model(data)
             self.group_count.update([self.node_data[n]['model']])
             self.local_index[n] = self.group_count[self.node_data[n]['model']] - 1
             if self.model_registry[self.node_data[n]['model']]['graph_type'] == 'input':
                 self.spike_input.append(data['times'])
+
+        # Remove the input model (IN) if counts are zero
+        if self.group_count['IN'] == 0:
+            del self.group_count['IN']
+
+        # Get the model insertion order of our counter, and organize node map by group
+        self.group_index = {key: index for index, key in enumerate(self.group_count.keys())}
+        self.group_sorted_count = [self.group_count[group] for group in self.group_index]
+        self.group_offset = [0] + [sum(self.group_sorted_count[:i+1]) for i in range(len(self.group_sorted_count))]
+        self.node_map = {key: self.group_offset[self.group_index[self.node_data[n]['model']]] + self.local_index[n]
+                         for key, n in self.node_index.items()}
         
         # Global edge data
         for source, target, data in self.dsl_graph.edges(data=True):
-            s = self.node_map[source]
-            t = self.node_map[target]
+            s = self.node_index[source]
+            t = self.node_index[target]
             self.edge_data[s][t] = self.rekey_model(data)
             self.edge_set.add((self.edge_data[s][t]['model'], self.node_data[s]['model'], self.node_data[t]['model']))
             

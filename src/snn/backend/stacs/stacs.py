@@ -26,7 +26,8 @@ class SimSTACS:
         self.recordir = 'record'
         self.netparts = 1
         self.netfiles = 1
-        
+
+        self.node_map = None
         self.spike_list = None
         self.record_points = None
         
@@ -157,7 +158,7 @@ class SimSTACS:
         self.num_nodes = stacs_network.number_of_nodes() + self.num_streams
         self.num_edges = 0 # undirected edges (computed later)
         
-        self.node_map = dict()
+        self.node_index = dict()
         self.node_data = [dict() for _ in range(self.num_nodes)]
         self.edge_data = [dict() for _ in range(self.num_nodes)] # this will be dict of dicts
         self.group_count = Counter()
@@ -171,17 +172,20 @@ class SimSTACS:
         self.spike_input = dict()
         if self.has_input:
             for n, (name, value) in enumerate(self.input_model.items()):
-                self.node_map[value['name']] = n
+                self.node_index[value['name']] = n
                 self.node_data[n] = {'model': name, 'group_name': name}
                 self.group_count.update([name])
                 self.local_index[n] = self.group_count[name] - 1
                 input_targets.append(value['target'])
                 input_source[value['target']] = name
-        
+
+        # Add input model (IN) to the beginning of the group
+        self.group_count['IN'] = 0
+
         # Nodes and indexes
         for n, (node, data) in enumerate(stacs_network.nodes(data=True)):
             index = n + self.num_streams
-            self.node_map[node] = index
+            self.node_index[node] = index
             self.node_data[index] = self.rekey_model(data)
             group_param = self.rekey_param(data)
             if group_param not in self.node_set[self.node_data[index]['model']]:
@@ -194,7 +198,7 @@ class SimSTACS:
             self.group_count.update([group_name])
             self.local_index[index] = self.group_count[group_name] - 1
             if self.has_input and data['model'] in input_targets:
-                source_index = self.node_map[self.input_model[input_source[data['model']]]['name']]
+                source_index = self.node_index[self.input_model[input_source[data['model']]]['name']]
                 edge_model = self.input_model[input_source[data['model']]]['edge']
                 model_name = {'model': edge_model}
                 default_states = {key: item['default'] for key, item in self.model_registry[edge_model]['state'].items()}
@@ -204,14 +208,22 @@ class SimSTACS:
                 edge_name = f"{self.edge_data[index][source_index]['model']}_{self.node_data[source_index]['group_name']}_{self.node_data[index]['group_name']}"
                 self.edge_data[index][source_index]['group_name'] = edge_name
                 self.spike_input[index] = data['times']
-                
-        # Get the model insertion order of our counter
+
+        # Remove the input model (IN) if counts are zero
+        if self.group_count['IN'] == 0:
+            del self.group_count['IN']
+
+        # Get the model insertion order of our counter, and organize node map by group
         self.group_index = {key: index for index, key in enumerate(self.group_count.keys())}
+        self.group_sorted_count = [self.group_count[group] for group in self.group_index]
+        self.group_offset = [0] + [sum(self.group_sorted_count[:i+1]) for i in range(len(self.group_sorted_count))]
+        self.node_map = {key: self.group_offset[self.group_index[self.node_data[n]['group_name']]] + self.local_index[n]
+                         for key, n in self.node_index.items()}
         
         # Edges (to semi-undirected format)
         for source, target, data in stacs_network.edges(data=True):
-            s = self.node_map[source]
-            t = self.node_map[target]
+            s = self.node_index[source]
+            t = self.node_index[target]
             self.edge_data[t][s] = self.rekey_model(data)
             edge_tuple = (self.edge_data[t][s]['model'], self.node_data[s]['group_name'], self.node_data[t]['group_name'])
             group_param = self.rekey_param(data)
