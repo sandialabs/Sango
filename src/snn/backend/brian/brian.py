@@ -226,6 +226,8 @@ class SimBrian:
                 self.spike_list[offset+monitor.i[s]].append(monitor.t[s]/ms)
             offset += self.group_count[name]
         
+        return self.spike_list
+        
     # Return spikes as event list
     def get_spikes(self):
         if self.spike_list is None:
