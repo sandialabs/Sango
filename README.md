@@ -14,7 +14,7 @@ python -m pip install -e .
 
 ## General Structure
 
-At the core of the DSL is the structural organization of networks analogous to a directory listing of folders (networks themselves), files (topological components), and their contents (nodes and edges). Additionally, alias classes (analogous to symlinks) provide a degree of indirection and introduce reference dependencies that allows for the procedural construction of complex network topologies.
+At the core of the SNN-DSL is the structural organization of networks analogous to a directory listing of folders (networks themselves), files (topological components), and their contents (nodes and edges). Additionally, alias classes (analogous to symlinks) provide a degree of indirection and introduce reference dependencies that allows for the procedural construction of complex network topologies.
 
 The main classes that accomplish this are:
 - `Network`: the main container that is built out of high-level topological components (including other networks)
@@ -118,8 +118,9 @@ class LIF(Neuron):
     model: str = 'LIF'       # model name
     voltage: float = 0.0     # individual parameter
     threshold: float = 1.0
-    reset: float = 0.0,      # shared parameter
-    leak: float = 1.0
+    reset: float = 0.0,      # shared parameter (note: this is for illustration, the
+    leak: float = 1.0        #                   basic LIF model provided by the SNN-DSL
+                             #                   has 'reset' as an individual parameter)
 
 res = NodeGroup(LIF(threshold=0.9),    # model parameter default
                 size=3,                # node group size
@@ -135,6 +136,76 @@ print(res.reset)        # [(0.1,)]
 print(res.leak)         # [0.5 0.4 0.3]
 ```
 
+```python
+@dataclass
+class PSP(Synapse):
+    model: str = 'PSP'
+    delay: float = 1.0
+    weight: float = 1.0
+
+rr = EdgeGroup(res, res, PSP(delay=2.0),    # model parameter default
+               edges=[(0,1), (1,2), (2,0)], # list of directed tuples (source, target)
+               weight=[1.0, 2.0, 3.0])      # individual parameter assignment
+rr[(1,2)].delay = 3.0       # individual edge parameter assignment (by tuple)
+rr[0].weight = 1.5          # individual edge parameter assignment (by index)
+
+print(rr.delay)       # [2.0 3.0 2.0]
+print(rr.weight)      # [1.5 2.0 3.0]
+
+# Edge groups have a mapping from directed tuples to linear indexes
+print(rr.edge_map)     # {(0, 1): 0, (1, 2): 1, (2, 0): 2}
+print(rr.target_index) # [1, 2, 0]
+```
+
 Node groups require a node model, and are preferably also instantiated with a size (as opposed to incrementally adding nodes). By default, if no size is provided, a single node will be instantiated.
 
 Edge groups require an edge model and source/target nodes (which may be node groups, node lists, or node ports), and are preferably also instantiated with a list of edges. This is a list of tuples of pairs of source/target indexes that are local with respect to the source/target sets of nodes, respectively. By default, if no edge list is provided, an edge with the source/target pair of (0,0) will be instantiated.
+
+## Simulation
+In addition to defining networks, it is often useful to simulate the constructed network. There is currently some simulation support provided through the Brian 2 and STACS spiking neural network simulators (installed separately). Here, the SNN-DSL may be thought of as the "frontend" interface to the "backend" simulator (or potentially neuromorphic hardware platform). This decoupling between frontend and backend is important for maintaining flexibility in the high-level network descriptions and for portability to different low-level network implementations.
+
+```python
+# Import the desired simulator backend
+from snn.backend import SimBrian
+
+sim = SimBrian(net)  # Pass the built network to the backend translation layer
+sim.compile()        # Convert the network onto the backend execution model
+sim.run(10.0)        # Simulate the network (arguments may be backend-specific)
+```
+
+Custom user inputs into a network may be provided through input node models. In particular, there is a simple spike generator input model that takes a list of spike times (which specifies when the node emits spikes). This can be wrapped in a node group to provide a list of input nodes, and further wrapped in a network for compositional reuse.
+
+```python
+class Input(Network):
+    def __init__(self, spike_times):
+        super().__init__()
+        self.spike_times = spike_times # number of nodes x lists of times
+
+    def build(self):
+        # Spike generator
+        self.spikegen = NodeGroup(IN(), len(self.spike_times), times=self.spike_times)
+        
+        return
+
+# Define spiking inputs as a list of lists
+input_vec = [[2, 4, 5],    # 0,1,1,0,1,0,0   (represented as bit strings,
+             [0, 1, 4, 6]] # 1,0,1,0,0,1,1    least significant bit first)
+
+net = Network()                         # instantiate network
+net.inp = Input(spike_times=input_vec)  # add an input network
+```
+
+Simulation outputs are similarly provided as a spike list of times (per node in the network). The mapping between a node in the SNN-DSL and the corresponding node in the backend is provided through a "node map" which is generated during the compilation process. There are also some convenience functions to plot the resulting spike raster. Additional features, such as recording state variables, depend on the backend that is used.
+
+```python
+spike_list = sim.get_spikes()                # Get the spike list for each node
+node_index = sim.node_map['inp.spikegen[1]'] # Find the index of a node by name
+inp1_spike = spike_list[node_index]          # Extract the node spike times
+
+# Plot the spike raster (this uses matplotlib's eventplot)
+sim.plot_spikes(tick_names=True)
+```
+
+The SNN-DSL currently provides a method for converting its network object into a NetworkX directed graph for ease of translation. Nodes and edges are simply identified by their flattened "path name", and any associated data are provided as additional attributes. While the network descriptions in the SNN-DSL are fairly flexible and open-ended, it does not prescribe node/edge model dynamics or how those computations should be implemented. Their translation with respect to a backend simulator is mediated through a "model registry" which provides the necessary information for mapping models. This is also intended to provide a degree of extensibility for custom user models.
+
+There is existing backend support for these basic node and edge models: LIF (leaky integrate-and-fire neuron model), PSP (post-synaptic potential synapse model), and IN (simple spike generator input model). There is also support for probabilistic spiking: pLIF (probabilistic LIF neuron model, which is used in Fugu). Support for additional model types may require updating the model registry.
