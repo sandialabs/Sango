@@ -660,7 +660,11 @@ class SimSTACS:
             with open(fname,"w") as file:
                 for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
                     # print(' ' + ' '.join(str(0.0) for _ in range(3)))
-                    file.write(' ' + ' '.join(str(0.0) for _ in range(3)) + '\n')
+                    # file.write(' ' + ' '.join(str(0.0) for _ in range(3)) + '\n')
+                    xyz = [self.node_data[n].get('x', 0.0),
+                           self.node_data[n].get('y', 0.0),
+                           self.node_data[n].get('z', 0.0)]
+                    file.write(' ' + ' '.join(str(c) for c in xyz) + '\n')
             
         # Event
         for fileidx in range(self.netfiles):
