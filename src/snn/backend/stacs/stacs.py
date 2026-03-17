@@ -616,7 +616,7 @@ class SimSTACS:
                         stick_info = []
                         for key, value in self.model_registry[self.node_data[target]['model']]['state'].items():
                             if 'rep' in value and value['rep'] == 'tick':
-                                stick_info.append(f'{int(self.node_data[target][key])*self.ticks_per_ms:x}')
+                                stick_info.append(f'{int(self.node_data[target][key]*self.ticks_per_ms):x}')
                                 stick_prefix[partidx+1] += 1
                             else:
                                 state_info.append(str(self.node_data[target][key]))
@@ -635,7 +635,7 @@ class SimSTACS:
                                 stick_info = []
                                 for key, item in self.model_registry[value['model']]['state'].items():
                                     if 'rep' in item and item['rep'] == 'tick':
-                                        stick_info.append(f'{int(value[key])*self.ticks_per_ms:x}')
+                                        stick_info.append(f'{int(value[key]*self.ticks_per_ms):x}')
                                         stick_prefix[partidx+1] += 1
                                     else:
                                         state_info.append(str(value[key]))
