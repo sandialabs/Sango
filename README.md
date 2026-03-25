@@ -1,10 +1,12 @@
 # Compositional Spiking Neural Network Domain Specific Language
 
-The SNN-DSL developed here is implemented as an internal DSL within Python, introducing a number of high level classes for compositionally constructing networks, and enabling flexible code reuse.
+Sango is a compositional spiking neural network domain specific language that is implemented as an internal DSL within Python, introducing a number of high level classes for compositionally constructing networks, and enabling flexible code reuse.
+
+The name Sango is inspired by the Japanese word for coral, a common habitat for pufferfish (see the [Fugu](https://github.com/sandialabs/Fugu) project), and admits the backronym Structured Abstractions for Network Group Organization.
 
 ## Installation
 
-The SNN-DSL package requires Python 3.9 or above (for more advanced dataclass support). There are also two main dependencies that are currently required: NumPy and NetworkX. The features used by these external packages are fairly generic, so versioning should not be an issue. Installation proceeds as with any standard python package.
+The Sango package requires Python 3.9 or above (for more advanced dataclass support). There are also two main dependencies that are currently required: NumPy and NetworkX. The features used by these external packages are fairly generic, so versioning should not be an issue. Installation proceeds as with any standard python package.
 
 ```
 git clone https://github.com/sandialabs/sango.git
@@ -14,7 +16,7 @@ python -m pip install -e .
 
 ## General Structure
 
-At the core of the SNN-DSL is the structural organization of networks analogous to a directory listing of folders (networks themselves), files (topological components), and their contents (nodes and edges). Additionally, alias classes (analogous to symlinks) provide a degree of indirection and introduce reference dependencies that allows for the procedural construction of complex network topologies.
+At the core of Sango is the structural organization of networks analogous to a directory listing of folders (networks themselves), files (topological components), and their contents (nodes and edges). Additionally, alias classes (analogous to symlinks) provide a degree of indirection and introduce reference dependencies that allows for the procedural construction of complex network topologies.
 
 The main classes that accomplish this are:
 - `Network`: the main container that is built out of high-level topological components (including other networks)
@@ -119,8 +121,8 @@ class LIF(Neuron):
     voltage: float = 0.0     # individual parameter
     threshold: float = 1.0
     reset: float = 0.0,      # shared parameter (note: this is for illustration, the
-    leak: float = 1.0        #                   basic LIF model provided by the SNN-DSL
-                             #                   has 'reset' as an individual parameter)
+    leak: float = 1.0        #                   basic LIF model provided by Sango has
+                             #                   'reset' as an individual parameter)
 
 res = NodeGroup(LIF(threshold=0.9),    # model parameter default
                 size=3,                # node group size
@@ -162,11 +164,11 @@ Node groups require a node model, and are preferably also instantiated with a si
 Edge groups require an edge model and source/target nodes (which may be node groups, node lists, or node ports), and are preferably also instantiated with a list of edges. This is a list of tuples of pairs of source/target indexes that are local with respect to the source/target sets of nodes, respectively. By default, if no edge list is provided, an edge with the source/target pair of (0,0) will be instantiated.
 
 ## Simulation
-In addition to defining networks, it is often useful to simulate the constructed network. There is currently some simulation support provided through the Brian 2 and STACS spiking neural network simulators (installed separately). Here, the SNN-DSL may be thought of as the "frontend" interface to the "backend" simulator (or potentially neuromorphic hardware platform). This decoupling between frontend and backend is important for maintaining flexibility in the high-level network descriptions and for portability to different low-level network implementations.
+In addition to defining networks, it is often useful to simulate the constructed network. There is currently some simulation support provided through the Brian 2 and STACS spiking neural network simulators (installed separately). Here, Sango may be thought of as the "frontend" interface to the "backend" simulator (or potentially neuromorphic hardware platform). This decoupling between frontend and backend is important for maintaining flexibility in the high-level network descriptions and for portability to different low-level network implementations.
 
 ```python
 # Import the desired simulator backend
-from snn.backend import SimBrian
+from sango.backend import SimBrian
 
 sim = SimBrian(net)  # Pass the built network to the backend translation layer
 sim.compile()        # Convert the network onto the backend execution model
@@ -195,7 +197,7 @@ net = Network()                         # instantiate network
 net.inp = Input(spike_times=input_vec)  # add an input network
 ```
 
-Simulation outputs are similarly provided as a spike list of times (per node in the network). The mapping between a node in the SNN-DSL and the corresponding node in the backend is provided through a "node map" which is generated during the compilation process. There are also some convenience functions to plot the resulting spike raster. Additional features, such as recording state variables, depend on the backend that is used.
+Simulation outputs are similarly provided as a spike list of times (per node in the network). The mapping between a node in Sango and the corresponding node in the backend is provided through a "node map" which is generated during the compilation process. There are also some convenience functions to plot the resulting spike raster. Additional features, such as recording state variables, depend on the backend that is used.
 
 ```python
 spike_list = sim.get_spikes()                # Get the spike list for each node
@@ -206,6 +208,6 @@ inp1_spike = spike_list[node_index]          # Extract the node spike times
 sim.plot_spikes(tick_names=True)
 ```
 
-The SNN-DSL currently provides a method for converting its network object into a NetworkX directed graph for ease of translation. Nodes and edges are simply identified by their flattened "path name", and any associated data are provided as additional attributes. While the network descriptions in the SNN-DSL are fairly flexible and open-ended, it does not prescribe node/edge model dynamics or how those computations should be implemented. Their translation with respect to a backend simulator is mediated through a "model registry" which provides the necessary information for mapping models. This is also intended to provide a degree of extensibility for custom user models.
+Sango currently provides a method for converting its network object into a NetworkX directed graph for ease of translation. Nodes and edges are simply identified by their flattened "path name", and any associated data are provided as additional attributes. While the network descriptions in Sango are fairly flexible and open-ended, it does not prescribe node/edge model dynamics or how those computations should be implemented. Their translation with respect to a backend simulator is mediated through a "model registry" which provides the necessary information for mapping models. This is also intended to provide a degree of extensibility for custom user models.
 
 There is existing backend support for these basic node and edge models: LIF (leaky integrate-and-fire neuron model), PSP (post-synaptic potential synapse model), and IN (simple spike generator input model). There is also support for probabilistic spiking: pLIF (probabilistic LIF neuron model, which is used in Fugu). Support for additional model types may require updating the model registry.
