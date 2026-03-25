@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="snn-dsl",
+    name="sango",
     version="1.0.0",
     author="Felix Wang",
     author_email="felwang@sandia.gov",
