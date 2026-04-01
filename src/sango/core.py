@@ -362,7 +362,10 @@ class EdgeGroup(list):
                 return root[index].name
             elif isinstance(root, NodeList):
                 try:
-                    return root[index].name
+                    node = root[index]
+                    while hasattr(node, 'link'):
+                        node = node.link
+                    return node.name
                 except AttributeError:
                     print(f"error at {root}[{index}]")
             elif isinstance(root, NodePort):
