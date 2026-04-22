@@ -49,8 +49,6 @@ class Topology(SimpleNamespace):
             self._network = net
         else:
             self._network = None
-        # unnamed edgegroups
-        self.edgegroups = list()
 
     # Recursively add topology attributes
     @staticmethod
@@ -307,7 +305,7 @@ class Topology(SimpleNamespace):
         _flatten_edgegroups(self) # finally for edge groups
         
     # Connect network elements
-    def connect(self, source, target, model=None, edges=None):
+    def connect(self, source, target):
         # Convert any temporary paths to source/target object references
         if isinstance(source, TempPath):
             source = self.access(source.path)
@@ -323,13 +321,6 @@ class Topology(SimpleNamespace):
             if (len(source) != len(target)):
                 print(f"warning: port size mismatch {len(source)} -> {len(target)}")
             target.set_link(source) # by reference
-        # Connect node groups and lists with edge groups
-        if (isinstance(source, (NodeGroup, NodePort, NodeList)) and
-            isinstance(target, (NodeGroup, NodeList))):
-            #print('adding unnamed edgegroup')
-            self.edgegroups.append(EdgeGroup(source, target, model, edges))
-        # Connecting individual nodes?
-        # Connecting multiple edgegroups?
 
     # Generate a networkx graph
     def to_nx(self):
@@ -476,11 +467,11 @@ class Network:
         else:
             setattr(self._topology, name, value)
 
-    # Adding connections (links, unnamed edgegroups)
-    def connect(self, source, target, model=None, edges=None):
+    # Adding connections (links to node ports)
+    def connect(self, source, target):
         # stash connections for future processing
         key = str(len(self._connections))
-        self._connections[key] = (source, target, model, edges)
+        self._connections[key] = (source, target)
 
     # Manually setting port sizes (for breaking dependency chains)
     def set_portsize(self, port, size):
@@ -628,7 +619,7 @@ class Network:
             
             # Add any connections
             connections = []
-            for key, (source, target, model, edges) in self._connections.items():
+            for key, (source, target) in self._connections.items():
                 # try to resolve any temporary paths
                 source_path = source.path
                 if isinstance(source, TempPath):
@@ -652,12 +643,6 @@ class Network:
                         target.set_link(source)
                     else:
                         print(f"error linking {target}: already linked")
-                    connections.append(key)
-                # connect unnamed edgegroups
-                if (isinstance(source, (NodeGroup, NodePort, NodeList)) and
-                    isinstance(target, (NodeGroup, NodeList))):
-                    print('info: adding unnamed edgegroup')
-                    self._topology.connect(source, target, model, edges)
                     connections.append(key)
             # cleanup any added connections from list
             for conn in connections:
