@@ -86,16 +86,16 @@ class Linear(Network):
         return
 ```
 
-Port size resolution is generally performed by connecting/linking a node port with a sized node group/list (from elsewhere in the network topology), or by manually specifying its size. In the case that node port dependencies cannot be resolved (e.g. for cyclic structures), the user will need to provide some additional information to break the dependency chain.
+Port size resolution is generally performed by binding/linking a node port with a sized node group/list (from elsewhere in the network topology), or by manually specifying its size. In the case that node port dependencies cannot be resolved (e.g. for cyclic structures), the user will need to provide some additional information to break the dependency chain.
 
 ```python
 net = Network()                 # instantiate network
 net.inp = NodeGroup(IN(), 12)   # add an input node group
 net.ff = [Linear(32),           # add a list of networks
           Linear(10)]
-# connect topological components (using dot notation)
-net.connect(net.inp, net.ff[0].inp)
-net.connect(net.ff[0].layer, net.ff[1].inp)
+# bind topological components to ports (using dot notation)
+net.bind(net.inp, net.ff[0].inp)
+net.bind(net.ff[0].layer, net.ff[1].inp)
 net.build()       # build network topology
 print(net)        # print the topological components
 

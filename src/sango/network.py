@@ -304,17 +304,17 @@ class Topology(SimpleNamespace):
         _flatten_nodelists(self)  # then for node lists
         _flatten_edgegroups(self) # finally for edge groups
         
-    # Connect network elements
-    def connect(self, source, target):
+    # Bind node groups to ports
+    def bind(self, source, target):
         # Convert any temporary paths to source/target object references
         if isinstance(source, TempPath):
             source = self.access(source.path)
             if isinstance(source, TempPath):
-                print(f"connection error: {source.path} does not exist")
+                print(f"binding error: {source.path} does not exist")
         if isinstance(target, TempPath):
             target = self.access(target.path)
             if isinstance(target, TempPath):
-                print(f"connection error: {target.path} does not exist")
+                print(f"binding error: {target.path} does not exist")
         # Link ports with object references
         if isinstance(target, NodePort):
             print('linking port as target')
@@ -373,7 +373,7 @@ class Network:
         self._name = ''
         self._parent = parent
         self._children = dict()
-        self._connections = dict()
+        self._bindings = dict()
         self._dependencies = dict()
         self._emptylists = dict()
         self._netlists = dict()
@@ -467,11 +467,11 @@ class Network:
         else:
             setattr(self._topology, name, value)
 
-    # Adding connections (links to node ports)
-    def connect(self, source, target):
-        # stash connections for future processing
-        key = str(len(self._connections))
-        self._connections[key] = (source, target)
+    # Adding bindings (links to node ports)
+    def bind(self, source, target):
+        # stash bindings for future processing
+        key = str(len(self._bindings))
+        self._bindings[key] = (source, target)
 
     # Manually setting port sizes (for breaking dependency chains)
     def set_portsize(self, port, size):
@@ -562,7 +562,7 @@ class Network:
     def finalize(self):
         pass
 
-    # Incrementally and recursively build children, add connections, resolve dependencies
+    # Incrementally and recursively build children, add bindings, resolve dependencies
     def recursive_build(self):
         # Go through any previously uninitialized lists
         for name, value in self._emptylists.items():
@@ -617,9 +617,9 @@ class Network:
                 del self._children[child]
             #print(f"debug: children remaining: {len(self._children)}")
             
-            # Add any connections
-            connections = []
-            for key, (source, target) in self._connections.items():
+            # Add any bindings
+            bindings = []
+            for key, (source, target) in self._bindings.items():
                 # try to resolve any temporary paths
                 source_path = source.path
                 if isinstance(source, TempPath):
@@ -631,7 +631,7 @@ class Network:
                     target = self.access(target.path)
                     if isinstance(target, TempPath):
                         print(f"info: waiting on target {self.net_path()}{target_path}")
-                # connect ports (bypass topology methods)
+                # bind ports (bypass topology methods)
                 if (isinstance(target, NodePort) and
                     not isinstance(source, TempPath)):
                     print(f"info: linking port {self.net_path()}{target_path}")
@@ -643,14 +643,14 @@ class Network:
                         target.set_link(source)
                     else:
                         print(f"error linking {target}: already linked")
-                    connections.append(key)
-            # cleanup any added connections from list
-            for conn in connections:
-                del self._connections[conn]
-            #print(f"debug: connections remaining: {len(self._connections)}")
-            # connections remaining after children are built should be 0
-            if ((not self._children) and self._connections):
-                print("error: connections remaining after children built")
+                    bindings.append(key)
+            # cleanup any added bindings from list
+            for binding in bindings:
+                del self._bindings[binding]
+            #print(f"debug: bindings remaining: {len(self._bindings)}")
+            # bindings remaining after children are built should be 0
+            if ((not self._children) and self._bindings):
+                print("error: bindings remaining after children built")
             
             # Resolve any dependencies
             for key, value in self._children.items():
