@@ -1,5 +1,6 @@
 # General Imports
 import numpy as np
+import warnings
 
 # Package Imports
 from .model.base import NodeModel, EdgeModel
@@ -111,7 +112,7 @@ class NodeGroup(list):
         if isinstance(model, NodeModel):
             self.nodemodel = model # defaults
         else:
-            print(f"error: {model} not NodeModel class")
+            raise TypeError(f"{model} not NodeModel class")
         self.path = None # if None, not built
         self.set_size(size)
         self.set_values(**kwargs)
@@ -194,7 +195,7 @@ class NodeGroup(list):
                     getattr(self, key)[0] = (value,) # keep it as tuple
                 elif hasattr(value, '__len__'):
                     if len(value) != len(getattr(self, key)):
-                        print(f"error: size mismatch for {key}, required {len(getattr(self, key))}, got {len(value)}")
+                        raise IndexError(f"size mismatch for {key}, required {len(getattr(self, key))}, got {len(value)}")
                     else:
                         for i, item in enumerate(value):
                             getattr(self, key)[i] = item
@@ -214,13 +215,19 @@ class EdgeGroup(list):
         if isinstance(model, EdgeModel):
             self.edgemodel = model # defaults
         else:
-            print(f"error: {model} not EdgeModel class")
+            raise TypeError(f"{model} not EdgeModel class")
         self.source = source
         self.target = target
         self.path = None
         self.edge_map = dict() # tuple to index
         self.set_edges(edges)
         self.set_values(**kwargs)
+        if 'edge' in kwargs.keys():
+            warnings.warn(
+                "'edge' found in EdgeGroup keys, did you mean 'edges'?",
+                category=SyntaxWarning,
+                stacklevel=2)
+
 
     def __str__(self):
         if self.path is not None:
@@ -287,7 +294,7 @@ class EdgeGroup(list):
         else:
             raise TypeError(f"Edge indices must be integers or a tuple of integers")
         if (s,t) in self.edge_map:
-            raise ValueError(f"error: edge '({s},{t})' already exists (no duplicates allowed)")
+            raise ValueError(f"edge '({s},{t})' already exists (no duplicates allowed)")
         # append new node to regular list
         index = len(self)
         super().append(Edge(s,t))
@@ -315,7 +322,7 @@ class EdgeGroup(list):
             for i, (s,t) in enumerate(edges):
                 # check for duplicates
                 if (s,t) in self.edge_map:
-                    raise ValueError(f"error: edge '({s},{t})' already exists (no duplicates allowed)")
+                    raise ValueError(f"edge '({s},{t})' already exists (no duplicates allowed)")
                 self.edge_map[(s,t)] = i
             
         # instantiate model data
@@ -348,7 +355,7 @@ class EdgeGroup(list):
                     getattr(self, key)[0] = (value,) # keep it as tuple
                 elif hasattr(value, '__len__'):
                     if len(value) != len(getattr(self, key)):
-                        print(f"error: size mismatch for {key}, required {len(getattr(self, key))}, got {len(value)}")
+                        raise IndexError(f"size mismatch for {key}, required {len(getattr(self, key))}, got {len(value)}")
                     else:
                         for i, item in enumerate(value):
                             getattr(self, key)[i] = item
@@ -367,11 +374,11 @@ class EdgeGroup(list):
                         node = node.link
                     return node.name
                 except AttributeError:
-                    print(f"error at {root}[{index}]")
+                    print(f"error tracing {root}[{index}]")
             elif isinstance(root, NodePort):
                 return trace(root.link, index)
             else:
-                print(f"error accessing {root} {index}")
+                print(f"error tracing {root} {index}")
                 return None
         
         # follow the links through ports
@@ -379,12 +386,10 @@ class EdgeGroup(list):
         for i in range(len(self)):
             self[i].source_name = trace(self.source, self[i].source_index)
             if self[i].source_name is None:
-                print(f"error at {self.path}: setting source path {self.source}")
-                return
+                raise ValueError(f"error at {self.path}: setting source path {self.source}")
             self[i].target_name = trace(self.target, self[i].target_index)
             if self[i].target_name is None:
-                print(f"error at {self.path}: setting target path {self.target}")
-                return
+                raise ValueError(f"error at {self.path}: setting target path {self.target}")
 
 # Alias class pointing to set of (external) nodes (e.g. Network Inputs)
 class NodePort(list):
@@ -409,7 +414,10 @@ class NodePort(list):
 
     def set_size(self, size):
         if self.size is not None:
-            print(f"warning: changing port size from {self.size} to {size}")
+            warnings.warn(
+                f"changing port size from {self.size} to {size}",
+                category=UserWarning,
+                stacklevel=2)
         super().__init__([Link(i) for i in range(size)])
         self.size = size
         
