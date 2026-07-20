@@ -867,8 +867,11 @@ class SimSTACS:
                         # the event format is [event type, timestamp, vertex index, optional payload]
                         event = line.split()
                         event_type = int (event[0])
-                        # spikes are event type "0"
-                        if event_type == 0:
+                        # spikes (weight) are event type "0"
+                        # stimulation (payload) are event type "1"
+                        # graded spikes (weight * payload) are event type "2"
+                        # assignment (set to payload) are event type "3"
+                        if event_type <= 3:
                             timestamp = float(int(event[1], 16)) / self.ticks_per_ms
                             # reindex the events and add to list
                             global_index = int(event[2])
