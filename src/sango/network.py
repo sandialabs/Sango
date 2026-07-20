@@ -87,6 +87,12 @@ class Topology(SimpleNamespace):
             else:
                 print(f"error accessing {root} {name}")
                 return
+        elif isinstance(root, NodeList):
+            if isinstance(name, int):
+                return (root[name],) # could be cleaner
+            else:
+                print(f"error accessing {root} {name}")
+                return
         elif isinstance(name, str):
             return getattr(root, name)
         elif isinstance(name, int):
@@ -196,19 +202,25 @@ class Topology(SimpleNamespace):
                 else:
                     print(f"error at {current_path}: cannot set path for {value}")
         def _flatten_nodelists(top, parent_path=''):
+            still_flattening = False
             for key, value in vars(top).items():
                 if key.startswith('_'):
                     continue
                 current_path = f"{parent_path}.{key}" if parent_path else key
                 # If the value is another topwork, recurse
                 if isinstance(value, Topology):
-                    _flatten_nodelists(value, current_path)
+                    still_flattening = _flatten_nodelists(value, current_path) or still_flattening
                 # If the value is a nodelist, replace any temp paths
                 elif isinstance(value, NodeList):
                     for i, item in enumerate(value):
                         if isinstance(item, TempPath):
                             node = top.access_node(item.path)
-                            if isinstance(node, TempPath):
+                            if isinstance(node, tuple):
+                                if isinstance(node[0], TempPath):
+                                    still_flattening = True
+                                else:
+                                    value[i] = node[0]
+                            elif isinstance(node, TempPath):
                                 print(f"error at {current_path}: {node.path} does not exist")
                             else:
                                 value[i] = node
@@ -230,12 +242,17 @@ class Topology(SimpleNamespace):
                     for i, item in enumerate(value):
                         list_path = f"{current_path}[{i}]"
                         if isinstance(item, Topology):
-                            _flatten_nodelists(item, list_path)
+                            still_flattening = _flatten_nodelists(item, list_path) or still_flattening
                         elif isinstance(item, NodeList):
                             for e, entry in enumerate(item):
                                 if isinstance(entry, TempPath):
                                     node = top.access_node(entry.path)
-                                    if isinstance(node, TempPath):
+                                    if isinstance(node, tuple):
+                                        if isinstance(node[0], TempPath):
+                                            still_flattening = True
+                                        else:
+                                            item[e] = node[0]
+                                    elif isinstance(node, TempPath):
                                         print(f"error at {list_path}: {node.path} does not exist")
                                     else:
                                         item[e] = node
@@ -256,6 +273,7 @@ class Topology(SimpleNamespace):
                             print(f"error at {list_path}: cannot set path for {item}")
                 else:
                     print(f"error at {current_path}: cannot set path for {value}")
+            return still_flattening
         def _flatten_edgegroups(top, parent_path=''):
             for key, value in vars(top).items():
                 if key.startswith('_'):
@@ -301,7 +319,9 @@ class Topology(SimpleNamespace):
                     print(f"error at {current_path}: cannot set path for {value}")
         # Flattening order is important for resolution
         _flatten_nodegroups(self) # first for node groups (and ports)
-        _flatten_nodelists(self)  # then for node lists
+        still_flattening = _flatten_nodelists(self)  # then for node lists
+        while(still_flattening):
+            still_flattening = _flatten_nodelists(self)
         _flatten_edgegroups(self) # finally for edge groups
         
     # Bind node groups to ports
