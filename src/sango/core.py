@@ -202,6 +202,8 @@ class NodeGroup(list):
                 else: # single value
                     for i in range(len(getattr(self, key))):
                         getattr(self, key)[i] = value
+            else:
+                raise KeyError(f"'{key}' not found in node model {self.nodemodel}")
 
     # flatten
     def set_path(self, path):
@@ -221,12 +223,10 @@ class EdgeGroup(list):
         self.path = None
         self.edge_map = dict() # tuple to index
         self.set_edges(edges)
-        self.set_values(**kwargs)
         if 'edge' in kwargs.keys():
-            warnings.warn(
-                "'edge' found in EdgeGroup keys, did you mean 'edges'?",
-                category=SyntaxWarning,
-                stacklevel=2)
+            warnings.warn("'edge' found in keyword arguments, did you mean 'edges'?",
+                          category=SyntaxWarning, stacklevel=2)
+        self.set_values(**kwargs)
 
 
     def __str__(self):
@@ -362,6 +362,8 @@ class EdgeGroup(list):
                 else: # single value
                     for i in range(len(getattr(self, key))):
                         getattr(self, key)[i] = value
+            else:
+                raise KeyError(f"'{key}' not found in edge model {self.edgemodel}")
             
     def set_path(self, path):
         def trace(root, index):
