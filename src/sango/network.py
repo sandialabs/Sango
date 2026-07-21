@@ -469,11 +469,15 @@ class Network:
             self._children[name] = value
             value._parent = self
             value._name = f"{name}"
+            # set path to node ports early (before flattening)
+            for key, entry in vars(value._topology).items():
+                if isinstance(entry, NodePort):
+                    entry.set_path(f"{self.net_path()}{name}.{key}")
         # also stash lists of networks
         elif (type(value) is list):
             if isinstance(value[0], Network):
                 if not all(isinstance(item, Network) for item in value):
-                    print(f"error adding {self.net_path}{name} list: not all elements are networks")
+                    print(f"error adding {self.net_path()}{name} list: not all elements are networks")
                 print(f"info: adding list of networks {self.net_path()}{name}")
                 self._children[name] = value
                 # placeholder paths for network lists
@@ -482,6 +486,10 @@ class Network:
                 for i, item in enumerate(value):
                     item._parent = self
                     item._name = f"{name}[{i}]"
+                    # set path to node ports early (before flattening)
+                    for key, entry in vars(item._topology).items():
+                        if isinstance(entry, NodePort):
+                            entry.set_path(f"{self.net_path()}{name}[{i}].{key}")
             else:
                 setattr(self._topology, name, value)
         else:
@@ -598,6 +606,8 @@ class Network:
             else:
                 # regular attributes
                 super().__setattr__(name, value)
+        # Clear dictionary
+        self._emptylists.clear()
 
         # Add any placeholder netlists to the topology
         for name, value in self._netlists.items():
@@ -662,7 +672,7 @@ class Network:
                     if target.link is None:
                         target.set_link(source)
                     else:
-                        print(f"error linking {target}: already linked")
+                        print(f"error linking {self.net_path()}{target_path}: already linked")
                     bindings.append(key)
             # cleanup any added bindings from list
             for binding in bindings:
