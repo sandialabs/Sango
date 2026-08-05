@@ -1,8 +1,10 @@
 # STACS notebook networks
 dslnet/
 
-# Ignore .DS_Store
+# Ignore OS metadata
 .DS_Store
+Thumbs.db
+thumbs.db
 
 # Taken from https://github.com/github/gitignore
 
