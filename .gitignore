@@ -1,6 +1,9 @@
 # STACS notebook networks
 dslnet/
 
+# Ignore .DS_Store
+.DS_Store
+
 # Taken from https://github.com/github/gitignore
 
 # Byte-compiled / optimized / DLL files
