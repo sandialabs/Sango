@@ -3,9 +3,13 @@ import sys
 from pathlib import Path
 import importlib.util
 
-import brian2
-from brian2 import NeuronGroup, Synapses, SpikeGeneratorGroup, SpikeMonitor
-from brian2 import ms, defaultclock
+try:
+	import brian2
+except ImportError:
+	brian2 = None
+if brian2 is not None:
+    from brian2 import NeuronGroup, Synapses, SpikeGeneratorGroup, SpikeMonitor
+    from brian2 import ms, defaultclock
 
 import time
 from collections import Counter
@@ -16,6 +20,9 @@ import matplotlib.pyplot as plt
 # Brian Simulation Backend
 class SimBrian:
     def __init__(self, dsl_net):
+        if brian2 is None:
+            raise ImportError("brian2 package is required for SimBrian")
+        
         self.dsl_net = dsl_net
         self.tstep = 1.0*ms
         self.timesteps = None
