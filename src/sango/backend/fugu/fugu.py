@@ -8,7 +8,7 @@ try:
 except ImportError:
 	fugu = None
 if fugu is not None:
-    from fugu import Scaffold, Brick
+    from fugu import Scaffold
     from fugu.scaffold import PortData, ChannelData
     from fugu.backends import snn_Backend
 
@@ -108,9 +108,9 @@ class SimFugu:
         self.fugu_backend.compile(self.scaffold, self.backend_args)
 
     # Dummy brick object for Fugu scaffold
-    class Dummy(Brick):
+    class DummyBrick():
         def __init__(self, name='dummy'):
-            super().__init__(name)
+            self.name = name
             self.vector = []
             self.index = 0
             self.is_built = True
@@ -134,13 +134,13 @@ class SimFugu:
         # Input and main Sango bricks
         input_brick = {'tag': 'input',
                        'name': 'InputBrick',
-                       'brick': self.Dummy('input'),
+                       'brick': self.DummyBrick('input'),
                        'layer': 'input',
                        'ports': {'output': None},
                        'is_built': True}
         sango_brick = {'tag': 'sango',
                        'name': 'SangoBrick',
-                       'brick': self.Dummy('sango'),
+                       'brick': self.DummyBrick('sango'),
                        'layer': 'output',
                        'ports': {'input': None},
                        'is_built': True}
