@@ -31,6 +31,11 @@ class SimFugu:
         self.spike_list = None
     
         self.model_registry = self.import_registry()
+
+        self.fugu_backend = None
+        self.debug = None
+        self.backend_args = None
+        self.scaffold = None
     
     # Dynamically import the model registry files
     def import_registry(self):
