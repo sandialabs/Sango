@@ -10,8 +10,9 @@ setup(
     long_description_content_type="text/markdown",
     packages=find_packages(),
     package_dir={"": "src"},
+    python_requires=">=3.9",
     install_requires=[
-        "numpy",
-        "networkx",
+        "numpy>=1.19.3",
+        "networkx>=2.4",
     ],
 )
