@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sango"
+version = "1.0.0"
+description = "Compositional Spiking Neural Network Domain Specific Language"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+authors = [
+  { name = "Felix Wang", email = "felwang@sandia.gov" }
+]
+dependencies = [
+  "numpy>=1.19.3",
+  "networkx>=2.4"
+]
+
+classifiers = [
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+[project.urls]
+Repository = "https://github.com/sandialabs/Sango"
+
+[tool.setuptools.packages.find]
+where = ["src"]
