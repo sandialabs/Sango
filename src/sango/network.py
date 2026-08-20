@@ -18,6 +18,17 @@ class TempPath:
         return self.path + ' (temp)'
     
     def __getattr__(self, key):
+        # Exception for instance attributes in child networks
+        # Prior to build, these are located in net._children
+        if self.path in self.net._children:
+            # only return attribute if already defined
+            try:
+                result = getattr(self.net._children[self.path], key)
+                if not isinstance(result, TempPath):
+                    return result
+            except AttributeError:
+                pass
+        # Recursively construct TempPath normally
         return TempPath(self.net, self.root, '.'.join((self.path, key)))
         
     def __getitem__(self, item):
@@ -37,18 +48,13 @@ class TempPath:
 
 # Directory structure of network topology
 class Topology(SimpleNamespace):
-    def __init__(self, net=None, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
         for key, value in kwargs.items():
             if type(value) == dict:
                 setattr(self, key, Topology(**value))
             elif type(value) == list:
                 setattr(self, key, list(map(self.map_entry, value)))
-        # link back to parent network if provided
-        if isinstance(net, Network):
-            self._network = net
-        else:
-            self._network = None
 
     # Recursively add topology attributes
     @staticmethod
@@ -133,10 +139,6 @@ class Topology(SimpleNamespace):
         if resolved_path is None:
             print(f"error resolving path {path}")
         return resolved_path
-
-    # Temporary path if object doesn't exist
-    def __getattr__(self, key):
-        return TempPath(self._network, self, key)
 
     def __str__(self):
         def format_paths(top):
@@ -386,7 +388,7 @@ class Topology(SimpleNamespace):
 # Built hierarchically around dependencies
 class Network:
     def __init__(self, parent=None):
-        self._topology = Topology(self)
+        self._topology = Topology()
         self._built = False
         self._graph = None
         # Scaffolding
@@ -447,10 +449,16 @@ class Network:
 
     # Expose the underlying Topology
     def __getattr__(self, name):
-        if name in self._emptylists:
+        # Check if built in topology
+        topo_dict = vars(self._topology)
+        if name in topo_dict:
+            return topo_dict[name]
+        # exception for empty lists (prior to build)
+        elif name in self._emptylists:
             return self._emptylists[name]
+        # otherwise, create a temporary path
         else:
-            return getattr(self._topology, name)
+            return TempPath(self, self._topology, name)
     
     def __dir__(self):
         return (super().__dir__()
@@ -469,10 +477,6 @@ class Network:
             self._children[name] = value
             value._parent = self
             value._name = f"{name}"
-            # set path to node ports early (before flattening)
-            for key, entry in vars(value._topology).items():
-                if isinstance(entry, NodePort):
-                    entry.set_path(f"{self.net_path()}{name}.{key}")
         # also stash lists of networks
         elif (type(value) is list):
             if isinstance(value[0], Network):
@@ -486,10 +490,6 @@ class Network:
                 for i, item in enumerate(value):
                     item._parent = self
                     item._name = f"{name}[{i}]"
-                    # set path to node ports early (before flattening)
-                    for key, entry in vars(item._topology).items():
-                        if isinstance(entry, NodePort):
-                            entry.set_path(f"{self.net_path()}{name}[{i}].{key}")
             else:
                 setattr(self._topology, name, value)
         else:
@@ -612,6 +612,28 @@ class Network:
         # Add any placeholder netlists to the topology
         for name, value in self._netlists.items():
             setattr(self._topology, name, value)
+
+        # Set paths to node ports early (before flattening)
+        # This can be useful info for debugging port binding
+        for name, value in self._children.items():
+            if isinstance(value, Network):
+                for key, entry in vars(value._topology).items():
+                    if isinstance(entry, NodePort):
+                        entry.set_path(f"{name}.{key}")
+                    elif (type(entry) is list):
+                        if isinstance(entry[0], NodePort):
+                            for i, item in enumerate(entry):
+                                item.set_path(f"{name}.{key}[{i}]")
+            elif (type(value) is list):
+                if isinstance(value[0], Network):
+                    for i, item in enumerate(value):
+                        for key, entry in vars(item._topology).items():
+                            if isinstance(entry, NodePort):
+                                entry.set_path(f"{name}[{i}].{key}")
+                            elif (type(entry) is list):
+                                if isinstance(entry[0], NodePort):
+                                    for j, sub_item in enumerate(entry):
+                                        sub_item.set_path(f"{name}[{i}].{key}[{j}]")
 
         # Main build process
         # Basically a topological sort at each network level
