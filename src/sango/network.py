@@ -586,10 +586,6 @@ class Network:
         if generate_graph:
             self.graph(update=True)
 
-    # Post build tasks (e.g. node lists)
-    def finalize(self):
-        pass
-
     # Incrementally and recursively build children, add bindings, resolve dependencies
     def recursive_build(self):
         # Go through any previously uninitialized lists
@@ -612,6 +608,7 @@ class Network:
         # Add any placeholder netlists to the topology
         for name, value in self._netlists.items():
             setattr(self._topology, name, value)
+        self._netlists.clear()
 
         # Set paths to node ports early (before flattening)
         # This can be useful info for debugging port binding
@@ -638,13 +635,16 @@ class Network:
         # Main build process
         # Basically a topological sort at each network level
         still_building = True
-        children_count = len(self._children)
         build_loops = 0
         max_build_loops = 3
+        children_unbuilt = set(self._children.keys())
+        tobuild_count = sum(sum(not item._built for item in value) if isinstance(value, list)
+                            else (not value._built) for value in self._children.values())
         while (still_building):
             # Build any bricks (hierarchically, and if dependencies met)
-            children = []
-            for key, value in self._children.items():
+            children_built = set()
+            for key in children_unbuilt:
+                value = self._children[key]
                 if type(value) is list:
                     for i, item in enumerate(value):
                         # build any item that can be built (that hasn't already been built)
@@ -653,21 +653,17 @@ class Network:
                             item.build()
                             # update the placeholder list item
                             getattr(self._topology, key)[i] = item._topology
-                            # reset build loop counter
-                            build_loops = 0
                     # add the list if everything built (all dependencies met)
                     if not any(item._dependencies for item in value):
-                        children.append(key)
+                        children_built.add(key)
                 else:
-                    if not value._dependencies:
+                    if not value._dependencies and value._built == False:
                         print(f"info: building network {self.net_path()}{key}")
                         value.build()
                         setattr(self._topology, key, value._topology)
-                        children.append(key)
-            # cleanup any built networks from list
-            for child in children:
-                del self._children[child]
-            #print(f"debug: children remaining: {len(self._children)}")
+                        children_built.add(key)
+            # cleanup any built networks from set
+            children_unbuilt -= children_built
             
             # Add any bindings
             bindings = []
@@ -700,9 +696,6 @@ class Network:
             for binding in bindings:
                 del self._bindings[binding]
             #print(f"debug: bindings remaining: {len(self._bindings)}")
-            # bindings remaining after children are built should be 0
-            if ((not self._children) and self._bindings):
-                print("error: bindings remaining after children built")
             
             # Resolve any dependencies
             for key, value in self._children.items():
@@ -737,12 +730,19 @@ class Network:
                             print(f"error: dependency value at {dep_value}")
                     for dep_key in dep_keys:
                         del value._dependencies[dep_key]
-                        
+            
             # Check if done building
-            if not self._children:
-                still_building = False
-            elif len(self._children) < children_count:
-                children_count = len(self._children)
+            unbuilt_count = sum(sum(not item._built for item in value) if isinstance(value, list)
+                                else (not value._built) for value in self._children.values())
+            #print(f"debug: children remaining: {unbuilt_count}")
+            if unbuilt_count == 0:
+                if (self._bindings):
+                    # bindings remaining after children are built should be 0
+                    print("error: bindings remaining after children built")
+                else:
+                    still_building = False
+            elif unbuilt_count < tobuild_count:
+                tobuild_count = unbuilt_count
                 # reset loop counter
                 build_loops = 0
             else:
@@ -753,7 +753,6 @@ class Network:
                     still_building = False
         
         # Finalize and cleanup
-        self.finalize()
         self._built = True
 
         # Flatten networks at top level
