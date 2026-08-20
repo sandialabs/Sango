@@ -32,7 +32,7 @@ class SimFugu:
         self.debug = None
         self.backend_args = None
         self.scaffold = None
-        self.spike_input = dict()
+        self.spike_input = None
         self.output_neurons = []
     
     # Dynamically import the model registry files
@@ -178,6 +178,7 @@ class SimFugu:
         self.group_count = Counter()
         self.local_index = [0 for _ in range(self.num_nodes)]
         self.group_count['IN'] = 0
+        self.spike_input = dict()
 
         # Global node data
         for n, (node, data) in enumerate(self.dsl_graph.nodes(data=True)):
