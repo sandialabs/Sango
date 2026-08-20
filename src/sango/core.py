@@ -16,16 +16,20 @@ class Node:
         self.name = None
 
     def __getattr__(self, name):
-        if name in self.data:
-            if hasattr(self.data[name], 'base'):
+        try:
+            data = object.__getattribute__(self, 'data')
+        except AttributeError:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        if name in data:
+            if hasattr(data[name], 'base'):
                 # element of numpy array (could be more error checking)
-                if (isinstance(self.data[name][0], tuple) and
-                    len(self.data[name][0]) == 1):
-                    return self.data[name][0][0]
+                if (isinstance(data[name][0], tuple) and
+                    len(data[name][0]) == 1):
+                    return data[name][0][0]
                 else:
-                    return self.data[name][0]
+                    return data[name][0]
             else:
-                return self.data[name]
+                return data[name]
         else:
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
@@ -60,16 +64,20 @@ class Edge:
         self.target_name = None
     
     def __getattr__(self, name):
-        if name in self.data:
-            if hasattr(self.data[name], 'base'):
+        try:
+            data = object.__getattribute__(self, 'data')
+        except AttributeError:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        if name in data:
+            if hasattr(data[name], 'base'):
                 # element of numpy array
-                if (isinstance(self.data[name][0], tuple) and
-                    len(self.data[name][0]) == 1):
-                    return self.data[name][0][0]
+                if (isinstance(data[name][0], tuple) and
+                    len(data[name][0]) == 1):
+                    return data[name][0][0]
                 else:
-                    return self.data[name][0]
+                    return data[name][0]
             else:
-                return self.data[name]
+                return data[name]
         else:
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
