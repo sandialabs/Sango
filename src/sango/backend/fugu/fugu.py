@@ -7,10 +7,6 @@ try:
 	import fugu
 except ImportError:
 	fugu = None
-if fugu is not None:
-    from fugu import Scaffold
-    from fugu.scaffold import PortData, ChannelData
-    from fugu.backends import snn_Backend
 
 import time
 from collections import Counter, defaultdict
@@ -36,6 +32,8 @@ class SimFugu:
         self.debug = None
         self.backend_args = None
         self.scaffold = None
+        self.spike_input = dict()
+        self.output_neurons = []
     
     # Dynamically import the model registry files
     def import_registry(self):
@@ -68,10 +66,20 @@ class SimFugu:
     def compile(self, backend='snn', backend_args={'record': 'all'}, debug=False):
         self.debug = debug
         if backend == 'snn':
+            from fugu.backends import snn_Backend
             self.fugu_backend = snn_Backend()
+        elif backend == 'stacs':
+            from fugu.backends import stacs_Backend
+            self.fugu_backend = stacs_Backend()
         else:
             raise NotImplementedError(f"Backend '{backend}' is not supported.")
         self.backend_args = backend_args
+        if self.backend_args['record'] != 'all':
+            if type(self.backend_args['record']) is list:
+                self.output_neurons = self.backend_args['record']
+            else:
+                raise TypeError(f"Recorded output neurons must be type list, "
+                                f"not {type(self.backend_args['record']).__name__}")
         if self.debug:
             self.backend_args['debug_mode'] = True
         
@@ -125,9 +133,19 @@ class SimFugu:
                 return result
             else:
                 raise StopIteration
+        def set_properties(self, properties=None):
+            properties = properties or {}
+            if "spike_vector" in properties:
+                self.vector = properties["spike_vector"]
+            return
 
     # Convert Sango network to Fugu Scaffold
     def to_scaffold(self, net):
+        # Scaffold imports
+        from fugu import Scaffold
+        from fugu.scaffold import PortData, PortSpec
+        from fugu.scaffold import ChannelData, ChannelSpec
+        
         # Set up a dummy scaffold in Fugu
         scaffold = Scaffold()
         scaffold_circuit = nx.DiGraph()
@@ -142,13 +160,14 @@ class SimFugu:
                        'name': 'SangoBrick',
                        'brick': self.DummyBrick('sango'),
                        'layer': 'output',
-                       'ports': {'input': None},
+                       'ports': {'input': None, 'output': None},
                        'is_built': True}
         # Connect dummy circuit
         scaffold_circuit.add_node(0, **input_brick)
         scaffold_circuit.add_node(1, **sango_brick)
         scaffold_circuit.add_edge(0, 1, bind={'input': 'output'})
         scaffold.tag_to_name = {'input': 'InputBrick', 'sango': 'SangoBrick'}
+        scaffold.name_to_tag = {'InputBrick': 'input', 'SangoBrick': 'sango'}
         scaffold.brick_to_number = {'InputBrick': 0, 'SangoBrick': 1}
 
         # Set up underlying graph
@@ -159,7 +178,6 @@ class SimFugu:
         self.group_count = Counter()
         self.local_index = [0 for _ in range(self.num_nodes)]
         self.group_count['IN'] = 0
-        self.spike_input = dict()
 
         # Global node data
         for n, (node, data) in enumerate(self.dsl_graph.nodes(data=True)):
@@ -189,10 +207,29 @@ class SimFugu:
                 spike_times[t].append(neuron)
         spike_vector = [spike_times[key] for key in range(max(spike_times.keys())+1)]
         scaffold_circuit.nodes[0]['brick'].vector = spike_vector
-        scaffold_circuit.nodes[0]['ports']['output'] = PortData(spec=None,
-            channels = {'data': ChannelData(spec=None, neurons = list(self.spike_input.keys()))})
-        scaffold_circuit.nodes[1]['ports']['input'] = PortData(spec=None,
-            channels = {'data': ChannelData(spec=None, neurons = [])})
+
+        # Remove potential input neurons from output list
+        input_set = set(self.spike_input.keys())
+        self.output_neurons = [n for n in self.output_neurons if n not in input_set]
+        
+        # Set up ports
+        scaffold_circuit.nodes[0]['ports']['output'] = PortData(
+            spec = PortSpec(name='output'),
+            channels = {'data': ChannelData(
+                spec = ChannelSpec(name='data', coding='Raster',
+                                   shape=(len(self.spike_input),)),
+                neurons = list(self.spike_input.keys()))})
+        scaffold_circuit.nodes[1]['ports']['input'] = PortData(
+            spec = PortSpec(name='input'),
+            channels = {'data': ChannelData(
+                spec = ChannelSpec(name='data', coding='Raster', shape=None),
+                neurons = [])})
+        scaffold_circuit.nodes[1]['ports']['output'] = PortData(
+            spec = PortSpec(name='output'),
+            channels = {'data': ChannelData(
+                spec = ChannelSpec(name='data', coding='Raster',
+                                   shape=(len(self.output_neurons),)),
+                neurons = self.output_neurons)})
         scaffold.circuit = scaffold_circuit
 
         # Insert nodes by group
