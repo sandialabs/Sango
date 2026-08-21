@@ -189,7 +189,7 @@ class Topology(SimpleNamespace):
                     value.set_path(current_path)
                 elif isinstance(value, (NodeList, EdgeGroup)):
                     pass
-                # If the value is a list, loop through 
+                # If the value is a list, loop through
                 elif isinstance(value, list):
                     for i, item in enumerate(value):
                         list_path = f"{current_path}[{i}]"
@@ -239,7 +239,7 @@ class Topology(SimpleNamespace):
                     value.set_path(current_path)
                 elif isinstance(value, (NodeGroup, NodePort, EdgeGroup)):
                     pass
-                # If the value is a list, loop through 
+                # If the value is a list, loop through
                 elif isinstance(value, list):
                     for i, item in enumerate(value):
                         list_path = f"{current_path}[{i}]"
@@ -276,6 +276,27 @@ class Topology(SimpleNamespace):
                 else:
                     print(f"error at {current_path}: cannot set path for {value}")
             return still_flattening
+        def _relink_ports(top, parent_path=''):
+            for key, value in vars(top).items():
+                if key.startswith('_'):
+                    continue
+                current_path = f"{parent_path}.{key}" if parent_path else key
+                # If the value is another topwork, recurse
+                if isinstance(value, Topology):
+                    _relink_ports(value, current_path)
+                # If the value is a node port, update any temp paths
+                elif isinstance(value, NodePort):
+                    if value.link is not None and isinstance(value.link, NodeList):
+                        value.set_link(value.link)
+                # If the value is a list, loop through
+                elif isinstance(value, list):
+                    for i, item in enumerate(value):
+                        list_path = f"{current_path}[{i}]"
+                        if isinstance(item, Topology):
+                            _relink_ports(item, list_path)
+                        elif isinstance(item, NodePort):
+                            if item.link is not None and isinstance(item.link, NodeList):
+                                item.set_link(item.link)
         def _flatten_edgegroups(top, parent_path=''):
             for key, value in vars(top).items():
                 if key.startswith('_'):
@@ -297,7 +318,7 @@ class Topology(SimpleNamespace):
                     value.set_path(current_path)
                 elif isinstance(value, (NodeGroup, NodePort, NodeList)):
                     pass
-                # If the value is a list, loop through 
+                # If the value is a list, loop through
                 elif isinstance(value, list):
                     for i, item in enumerate(value):
                         list_path = f"{current_path}[{i}]"
@@ -324,6 +345,7 @@ class Topology(SimpleNamespace):
         still_flattening = _flatten_nodelists(self)  # then for node lists
         while(still_flattening):
             still_flattening = _flatten_nodelists(self)
+        _relink_ports(self) # then fix any port links
         _flatten_edgegroups(self) # finally for edge groups
         
     # Bind node groups to ports
