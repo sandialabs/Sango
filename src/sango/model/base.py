@@ -1,6 +1,16 @@
 # General Imports
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 
+# Shared parameters across group
+def shared(default):
+    return field(default=default, metadata={'shared': True})
+
+def get_shared_params(model):
+    shared_set = {f.name for f in fields(model) if f.metadata.get('shared', False)}
+    # str-typed fields are implicitly shared parameters
+    shared_set |= {k for k, v in vars(model).items() if isinstance(v, str)}
+    return shared_set
+    
 # Base model classes
 @dataclass
 class NodeModel:

@@ -4,6 +4,7 @@ import warnings
 
 # Package Imports
 from .model.base import NodeModel, EdgeModel
+from .model.base import get_shared_params
 
 # Base classes
 class Node:
@@ -22,12 +23,8 @@ class Node:
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
         if name in data:
             if hasattr(data[name], 'base'):
-                # element of numpy array (could be more error checking)
-                if (isinstance(data[name][0], tuple) and
-                    len(data[name][0]) == 1):
-                    return data[name][0][0]
-                else:
-                    return data[name][0]
+                # element of numpy array
+                return data[name][0]
             else:
                 return data[name]
         else:
@@ -71,11 +68,7 @@ class Edge:
         if name in data:
             if hasattr(data[name], 'base'):
                 # element of numpy array
-                if (isinstance(data[name][0], tuple) and
-                    len(data[name][0]) == 1):
-                    return data[name][0][0]
-                else:
-                    return data[name][0]
+                return data[name][0]
             else:
                 return data[name]
         else:
@@ -121,6 +114,7 @@ class NodeGroup(list):
             self.nodemodel = model # defaults
         else:
             raise TypeError(f"{model} not NodeModel class")
+        self.shared_params = get_shared_params(self.nodemodel)
         self.path = None # if None, not built
         self.set_size(size)
         self.set_values(**kwargs)
@@ -132,7 +126,7 @@ class NodeGroup(list):
             return 'detached nodegroup'
 
     def __setattr__(self, name, value):
-        if name in ('path', 'nodemodel'):
+        if name in ('path', 'nodemodel', 'shared_params'):
             super().__setattr__(name, value)
         elif name in vars(self.nodemodel).keys():
             set_dict = {name: value}
@@ -155,7 +149,7 @@ class NodeGroup(list):
         super().append(Node(index))
         # append to numpy arrays (very slow...)
         for key, value in vars(self.nodemodel).items():
-            if isinstance(value, (str, tuple)): # don't update shared params
+            if key in self.shared_params: # don't update shared params
                 self[index].data[key] = getattr(self, key)[0:1]
                 continue
             if key in kwargs:
@@ -175,7 +169,7 @@ class NodeGroup(list):
         
         # instantiate model data
         for key, value in vars(self.nodemodel).items():
-            if isinstance(value, (str, tuple)): # shared params
+            if key in self.shared_params: # shared params
                 self.__dict__[key] = np.empty(1,dtype=object)
                 self.__dict__[key][0] = value
                 for item in self:
@@ -196,11 +190,8 @@ class NodeGroup(list):
     def set_values(self, **kwargs):
         for key, value in kwargs.items():
             if key in vars(self.nodemodel).keys():
-                if isinstance(value, (str, tuple)):
+                if key in self.shared_params:
                     getattr(self, key)[0] = value
-                elif (isinstance(value, (int, float)) and
-                      isinstance(getattr(self, key)[0], tuple)):
-                    getattr(self, key)[0] = (value,) # keep it as tuple
                 elif hasattr(value, '__len__'):
                     if len(value) != len(getattr(self, key)):
                         raise IndexError(f"size mismatch for {key}, required {len(getattr(self, key))}, got {len(value)}")
@@ -226,6 +217,7 @@ class EdgeGroup(list):
             self.edgemodel = model # defaults
         else:
             raise TypeError(f"{model} not EdgeModel class")
+        self.shared_params = get_shared_params(self.edgemodel)
         self.source = source
         self.target = target
         self.path = None
@@ -244,7 +236,7 @@ class EdgeGroup(list):
             return 'detached edgegroup'
     
     def __setattr__(self, name, value):
-        if name in ('path', 'edgemodel', 'source', 'target', 'edge_map'):
+        if name in ('path', 'edgemodel', 'source', 'target', 'edge_map', 'shared_params'):
             super().__setattr__(name, value)
         elif name in vars(self.edgemodel).keys():
             set_dict = {name: value}
@@ -309,7 +301,7 @@ class EdgeGroup(list):
         self.edge_map[(s,t)] = index
         # append to numpy arrays (very slow...)
         for key, value in vars(self.edgemodel).items():
-            if isinstance(value, (str, tuple)): # don't update shared params
+            if key in self.shared_params: # don't update shared params
                 self[index].data[key] = getattr(self, key)[0:1]
                 continue
             if key in kwargs:
@@ -335,7 +327,7 @@ class EdgeGroup(list):
             
         # instantiate model data
         for key, value in vars(self.edgemodel).items():
-            if isinstance(value, (str, tuple)): # shared params
+            if key in self.shared_params: # shared params
                 self.__dict__[key] = np.empty(1,dtype=object)
                 self.__dict__[key][0] = value
                 for item in self:
@@ -356,11 +348,8 @@ class EdgeGroup(list):
     def set_values(self, **kwargs):
         for key, value in kwargs.items():
             if key in vars(self.edgemodel).keys():
-                if isinstance(value, (str, tuple)):
+                if key in self.shared_params:
                     getattr(self, key)[0] = value
-                elif (isinstance(value, (int, float)) and
-                      isinstance(getattr(self, key)[0], tuple)):
-                    getattr(self, key)[0] = (value,) # keep it as tuple
                 elif hasattr(value, '__len__'):
                     if len(value) != len(getattr(self, key)):
                         raise IndexError(f"size mismatch for {key}, required {len(getattr(self, key))}, got {len(value)}")
