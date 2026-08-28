@@ -10,6 +10,7 @@ model_registry = {'pLIF': {'graph_type': 'neuron',
                            'method'    : 'exact',
                            'threshold' : '(v>v_thresh) and (rand()<=p_spike)',
                            'reset'     : '', # probabilistic spiking requires custom event
+                           'refractory': False,
                            'events'    : {'pass_thresh': 'v>v_thresh'},
                            'run_regularly' : [{'eqs': 'v*=(1.0-v_leak)', 'when': 'resets'},
                                               {'eqs': 'v+=v_bias',       'when': 'groups'}],

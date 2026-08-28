@@ -150,12 +150,25 @@ class SimBrian:
             self.synapse_states[full_name] = dict()
             for state in self.model_registry[name]['state']:
                 self.synapse_states[full_name][state] = []
+
+        # Parameters (needs to be updated to use group_param)
+        for name in self.model_registry:
+            self.model_registry[name]['namespace'] = dict()
+            if 'param' in self.model_registry[name]:
+                for param, param_dict in self.model_registry[name]['param'].items():
+                    if 'unit' in param_dict and param_dict['unit'] == 'ms':
+                        self.model_registry[name]['namespace'][param] = param_dict['default']*ms
+                    else:
+                        self.model_registry[name]['namespace'][param] = param_dict['default']
         
         # Neurons
         for n, data in enumerate(self.node_data):
             name = data['model']
-            for state in self.model_registry[name]['state']:
-                self.neuron_states[name][state].append(data[state])
+            for state, state_dict in self.model_registry[name]['state'].items():
+                if 'unit' in state_dict and state_dict['unit'] == 'ms':
+                    self.neuron_states[name][state].append(data[state]*ms)
+                else:
+                    self.neuron_states[name][state].append(data[state])
         
         # Synapses
         for s in range(self.num_nodes):
@@ -163,10 +176,12 @@ class SimBrian:
                 full_name = f"{data['model']}_{self.node_data[s]['model']}_{self.node_data[t]['model']}"
                 self.synapse_connections[full_name]['i'].append(self.local_index[s])
                 self.synapse_connections[full_name]['j'].append(self.local_index[t])
-                for state in self.model_registry[data['model']]['state']:
+                for state, state_dict in self.model_registry[data['model']]['state'].items():
                     if state == 'delay':
                         # Brian has a default delay of 0ms (to get to the next timestep)
                         self.synapse_states[full_name]['delay'].append((data['delay']-1.0)*ms)
+                    elif 'unit' in state_dict and state_dict['unit'] == 'ms':
+                        self.synapse_states[full_name][state].append(data[state]*ms)
                     else:
                         self.synapse_states[full_name][state].append(data[state])
 
@@ -189,8 +204,10 @@ class SimBrian:
                 self.neuron_groups[name] = NeuronGroup(count, model=self.model_registry[name]['model_eqs'],
                                                        threshold=self.model_registry[name]['threshold'],
                                                        reset=self.model_registry[name]['reset'],
+                                                       refractory=self.model_registry[name]['refractory'],
                                                        method=self.model_registry[name]['method'],
-                                                       events=dict(self.model_registry[name]['events']))
+                                                       events=dict(self.model_registry[name]['events']),
+                                                       namespace=self.model_registry[name]['namespace'])
                 # These "run regularly" methods bypass the standard Brian integration step
                 if 'run_regularly' in self.model_registry[name]:
                     for program in self.model_registry[name]['run_regularly']:
@@ -237,6 +254,7 @@ class SimBrian:
         # This is the scheduling of events needed for the synapse input not be discarded
         # (the default handling of synapses occurs between thresholds and resets)
         self.brian_net.schedule = ['start', 'groups', 'thresholds', 'resets', 'synapses', 'end']
+        # brian 2 default: ['start', 'groups', 'thresholds', 'synapses', 'resets', 'end']
     
     # Collect any output from the simulation
     def read_spikes(self):
