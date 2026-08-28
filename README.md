@@ -117,12 +117,12 @@ When a node/edge group is defined, a node/edge model instance is provided (allow
 ```python
 @dataclass
 class LIF(Neuron):
-    model: str = 'LIF'       # model name
-    voltage: float = 0.0     # individual parameter
+    model: str = 'LIF'         # model name
+    voltage: float = 0.0       # individual parameter
     threshold: float = 1.0
-    reset: float = 0.0,      # shared parameter (note: this is for illustration, the
-    leak: float = 1.0        #                   basic LIF model provided by Sango has
-                             #                   'reset' as an individual parameter)
+    reset: float = shared(0.0) # shared parameter (note: this is for illustration,
+    leak: float = 1.0          #           the basic LIF model provided by Sango
+                               #           has 'reset' as an individual parameter)
 
 res = NodeGroup(LIF(threshold=0.9),    # model parameter default
                 size=3,                # node group size
@@ -134,7 +134,7 @@ res[1].voltage = 0.8                   # individual node parameter assignment
 print(res.model)        # ['LIF']
 print(res.voltage)      # [0.6 0.8 0.6]
 print(res.threshold)    # [0.9 0.9 0.9]
-print(res.reset)        # [(0.1,)]
+print(res.reset)        # [0.1]
 print(res.leak)         # [0.5 0.4 0.3]
 ```
 
