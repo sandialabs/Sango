@@ -8,7 +8,8 @@ try:
 except ImportError:
 	brian2 = None
 if brian2 is not None:
-    from brian2 import NeuronGroup, Synapses, SpikeGeneratorGroup, SpikeMonitor
+    from brian2 import NeuronGroup, Synapses, SpikeGeneratorGroup
+    from brian2 import SpikeMonitor, StateMonitor
     from brian2 import ms, defaultclock
 
 import time
@@ -29,6 +30,7 @@ class SimBrian:
 
         self.node_map = None
         self.spike_list = None
+        self.record_dict = {}
     
         self.model_registry = self.import_registry()
 
@@ -191,6 +193,7 @@ class SimBrian:
         self.neuron_groups = dict()
         self.synapse_groups = dict()
         self.spike_monitors = dict()
+        self.state_monitors = dict()
 
         # Create input and neuron groups (and their spike monitors)
         for name, count in self.group_count.items():
@@ -240,6 +243,13 @@ class SimBrian:
             # Copy over states
             for state in self.model_registry[name]['state']:
                 getattr(self.synapse_groups[full_name], f"{state}")[:,:] = self.synapse_states[full_name][state]
+
+        # Recording (state monitors)
+        for name, value in self.record_dict.items():
+            group = self.neuron_groups.get(name, self.synapse_groups.get(name, None))
+            if group is None:
+                raise KeyError(f"group name {name} not found")
+            self.state_monitors[name] = StateMonitor(source=group, **value)
         
         # Add all the objects to the network
         for value in self.input_groups.values():
@@ -249,6 +259,8 @@ class SimBrian:
         for value in self.synapse_groups.values():
             self.brian_net.add(value)
         for value in self.spike_monitors.values():
+            self.brian_net.add(value)
+        for value in self.state_monitors.values():
             self.brian_net.add(value)
 
         # This is the scheduling of events needed for the synapse input not be discarded
