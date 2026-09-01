@@ -83,7 +83,7 @@ class SimBrian:
     def to_brian(self):
         # Get a flattened graph object
         self.dsl_graph = self.dsl_net._topology.to_nx()
-        defaultclock.dt = 1.0*ms
+        defaultclock.dt = self.tstep
 
         # Convert to Brian2 network objects
         self.num_nodes = self.dsl_graph.number_of_nodes()
