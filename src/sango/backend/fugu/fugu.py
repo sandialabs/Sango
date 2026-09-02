@@ -154,17 +154,18 @@ class SimFugu(Backend):
             model_name = node_data['model']
             node_data = {key: node_data[key] for key in self.model_registry[model_name]['state']}
             if self.model_registry[model_name]['graph_type'] == 'input':
-                scaffold_graph.add_node(node, neuron_number=nidx,
-                                        brick='InputBrick', **node_data)
+                scaffold_graph.add_node(node, neuron_number=nidx, brick='InputBrick',
+                                        model=model_name, **node_data)
             else:
-                scaffold_graph.add_node(node, neuron_number=nidx,
-                                        brick='SangoBrick', **node_data)
+                scaffold_graph.add_node(node, neuron_number=nidx, brick='SangoBrick',
+                                        model=model_name, **node_data)
 
         # Global edge data
         for source, target, data in self.ref_graph.edges(data=True):
             edge_data = self.edge_data[self.node_index[source]][self.node_index[target]]
-            edge_data = {key: edge_data[key] for key in self.model_registry[edge_data['model']]['state']}
-            scaffold_graph.add_edge(source, target, **edge_data)
+            model_name = edge_data['model']
+            edge_data = {key: edge_data[key] for key in self.model_registry[model_name]['state']}
+            scaffold_graph.add_edge(source, target, model=model_name, **edge_data)
 
         # Attach the built graph to the scaffold and mark as built
         scaffold.graph = scaffold_graph
