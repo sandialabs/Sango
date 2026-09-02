@@ -1,264 +1,197 @@
 import os
 import sys
 from pathlib import Path
-import importlib.util
 
-import time
 import yaml
 import subprocess
 from collections import Counter, defaultdict
 from contextlib import ExitStack
 
 import numpy as np
-import matplotlib.pyplot as plt
+
+from ..backend import Backend
 
 # STACS Simulation Backend
-class SimSTACS:
-    def __init__(self, net):
-        self.net = net
+class SimSTACS(Backend):
+    def __init__(self, net, debug=False, verbose=False):
+        super().__init__(net, debug=debug, verbose=verbose)
+        self.edge_order = 'target'
         self.num_streams = 0
-        self.num_nodes = 0
         self.num_edges = 0
-        
+
         self.netwkdir = './dslnet'
         self.filebase = 'network'
         self.file_ext = ''
         self.recordir = 'record'
         self.netparts = 1
         self.netfiles = 1
+        self.fileinit = False
 
-        self.node_map = None
-        self.spike_list = None
-        self.record_points = None
-        
+        self.stacsdir = '~/stacs'
+        self.runmode = 'simulate'
+        self.num_pe = None
+        self.randseed = None
+        self.tstep = 1.0 # ms
         self.ticks_per_ms = 1000000
-        self.timesteps = None
 
-        self.input_model = {'SI':  {'name': 'spike_input',
+        self.input_spec = {'SI':  {'name': 'spike_input',
                                     'target': 'IN',
                                     'edge': 'SC',
                                     'port': 'input/spike_input.yml'}}
-        self.model_registry = self.import_registry()
-        self.record_dict = {'events': ['spike'],
+        self.stream_input = None
+        self.record_spec = {'events': ['spike'],
                             'probes': []}
-        
+        self.record_points = None
+
         # Main simulation configuration
-        self.sim_conf = {'runmode': 'simulate',
-                         'randseed': 1421}
-        
+        self.sim_conf = {'runmode': self.runmode,
+                         'randseed': self.randseed}
+
+        # Partitions
+        self.part_conf = {'netwkdir': self.netwkdir,
+                          'filebase': self.filebase,
+                          'fileload': self.file_ext,
+                          'recordir': self.recordir,
+                          'netfiles': self.netfiles,
+                          'netparts': self.netparts}
+
         # Timing configuration
-        self.time_conf = {'tmax': self.timesteps} # ms
+        self.time_conf = {'tmax': self.timesteps, # ms
+                          'tstep': self.tstep}    # ms
 
-    # Dynamically import the model registry files
-    def import_registry(self):
-        registry = dict()
-        registry_dir = Path(__file__).resolve().parent / 'registry'
-        sys.path.insert(0, str(registry_dir.parent))
-        for file_path in registry_dir.glob("*.py"):
-            module_name = f"registry.{file_path.stem}"
-            spec = importlib.util.spec_from_file_location(module_name, file_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            registry.update(module.model_registry)
-        sys.path.pop(0)
-        return registry
+    # Convert to SNN-dCSR format
+    def to_backend(self, **kwargs):
+        self.netparts = kwargs.get('netparts', self.netparts)
+        self.netfiles = kwargs.get('netfiles', self.netfiles)
+        self.netwkdir = kwargs.get('prefix', self.netwkdir)
+        self.fileinit = kwargs.get('fileinit', False)
 
-    # Convert between dsl model to stacs model parameters
-    def rekey_param(self, data):
-        param = []
-        for key, value in self.model_registry[data['model']]['param'].items():
-            if value['dsl'] is not None:
-                param.append(data.pop(value['dsl']))
-            else:
-                param.append(value['default'])
-        return tuple(param)
-
-    # Convert between dsl model to stacs model
-    def rekey_model(self, data):
-        for key, value in self.model_registry[data['model']]['state'].items():
-            if value['dsl'] is not None:
-                data[key] = data.pop(value['dsl'])
-            else:
-                data[key] = value['default']
-        return data
-
-    def compile(self, netparts=1, netfiles=1, input=True, prefix='./dslnet',
-                write_fileinit=False, debug=False):
-        self.netparts = netparts
-        self.netfiles = netfiles
-        self.has_input = input
-        self.netwkdir = prefix
-        self.fileinit = write_fileinit
-        self.debug = debug
-
-        # Convert network to stacs
-        start_time = time.perf_counter()
-        self.to_stacs()
+        self.post_process_graph()
         self.write_yaml()
         if self.fileinit:
             self.write_file()
         self.write_dcsr()
-        end_time = time.perf_counter()
-        self.compile_time = end_time - start_time
-        if self.debug:
-            print(f"Compile time: {self.compile_time}")
 
-    # Run the network
-    def run(self, timesteps=10.0, num_pe=None, runmode=None, stacsdir='~/stacs', verbose=False):
+    def run_backend(self, timesteps=1, **kwargs):
+        self.timesteps = float(timesteps)
+        self.tstep = kwargs.get('tstep', self.tstep)
+        self.stacsdir = kwargs.get('stacsdir', self.stacsdir)
+        self.runmode = kwargs.get('runmode', self.runmode)
+        self.num_pe = kwargs.get('num_pe', self.num_pe)
+        self.randseed = kwargs.get('randseed', self.randseed)
+
         # Path to STACS executables
-        self.stacsdir = stacsdir
         self.charmrun = f"{self.stacsdir}/charmrun"
         self.stacsbin = f"{self.stacsdir}/stacs"
-        
+
         # Simulation arguments
         runconf = f"{self.netwkdir}/{self.filebase}.yml"
-        if num_pe is None:
-            charm_pe = '+p' + str(self.netparts)
+        if self.num_pe is None:
+            charm_pe = f"+p{self.netparts}"
         else:
-            charm_pe = '+p' + str(num_pe)
+            charm_pe = f"+p{self.num_pe}"
         charmrun = os.path.realpath(os.path.expanduser(self.charmrun))
         stacsbin = os.path.realpath(os.path.expanduser(self.stacsbin))
         self.timesteps = float(timesteps)
-        self.verbose = verbose
-        
+
         # Base command to run STACS
         runcmd = charmrun + ' ' + charm_pe + ' ' + stacsbin + ' ' + runconf
         if self.verbose:
             print(runcmd)
-        
+
         # Modify the simulation configuration
-        with open(runconf,"r") as file:
+        with open(runconf, "r") as file:
             config_yaml = yaml.safe_load(file)
         config_yaml['tmax'] = self.timesteps
-        with open(runconf,"w") as file:
-            yaml.dump(config_yaml,file,sort_keys=False)
+        with open(runconf, "w") as file:
+            yaml.dump(config_yaml, file, sort_keys=False)
 
         # Call STACS
-        start_time = time.perf_counter()
         runlist = runcmd.split()
-        if runmode is not None:
-            runlist.append(runmode)
-        if (self.verbose):
+        if self.runmode is not None:
+            runlist.append(self.runmode)
+        if self.verbose:
             subprocess.run(runlist)
         else:
             subprocess.run(runlist, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-        end_time = time.perf_counter()
-        self.run_time = end_time - start_time
-        if self.verbose:
-            print(f"Run time: {self.run_time}")
 
-    # Convert the network topology to STACS
-    def to_stacs(self):
-        # Get a flattened graph object
-        stacs_network = self.net._topology.to_nx()
-        
-        # Convert to SNN-dCSR
-        if self.has_input:
-            self.num_streams = len(self.input_model)
-        self.num_nodes = stacs_network.number_of_nodes() + self.num_streams
-        self.num_edges = 0 # undirected edges (computed later)
-        
-        self.node_index = dict()
-        self.node_data = [dict() for _ in range(self.num_nodes)]
-        self.edge_data = [dict() for _ in range(self.num_nodes)] # this will be dict of dicts
-        self.group_count = Counter()
-        self.local_index = [0 for _ in range(self.num_nodes)]
-        self.node_set = defaultdict(dict)
-        self.edge_set = defaultdict(dict)
-        
-        # Add special spike_input node (stream)
-        input_targets = []
-        input_source = dict()
-        self.spike_input = dict()
-        if self.has_input:
-            for n, (name, value) in enumerate(self.input_model.items()):
-                self.node_index[value['name']] = n
-                self.node_data[n] = {'model': name, 'group_name': name}
+    # Make some additions to the base graph processing
+    def post_process_graph(self):
+        # Check for input streams
+        stream_targets = []
+        stream_source = dict()
+        self.stream_input = dict()
+        if self.input_data:
+            # Update data structures based on stream information
+            for n, (name, value) in enumerate(self.input_spec.items()):
+                nidx = self.num_nodes + n
+                self.node_data.append(dict())
+                self.edge_data.append(dict())
+                self.local_index.append(0)
+                self.node_index[value['name']] = nidx
+                self.node_data[nidx] = {'model': name, 'group_name': name}
+                stream_targets.append(value['target'])
+                stream_source[value['target']] = name
+
+                # Update group information (streams have unique names)
                 self.group_count.update([name])
-                self.local_index[n] = self.group_count[name] - 1
-                input_targets.append(value['target'])
-                input_source[value['target']] = name
+                self.group_index[name] = len(self.group_index)
+                self.local_index[nidx] = 0
+                self.group_total.append(1)
+                self.group_offset.append(self.group_offset[-1]+1)
+                self.node_map[name] = nidx
 
-        # Add input model (IN) to the beginning of the group
-        self.group_count['IN'] = 0
+            # Update counts
+            self.num_streams = len(self.input_spec)
+            self.num_nodes += self.num_streams
 
-        # Nodes and indexes
-        for n, (node, data) in enumerate(stacs_network.nodes(data=True)):
-            index = n + self.num_streams
-            self.node_index[node] = index
-            self.node_data[index] = self.rekey_model(data)
-            group_param = self.rekey_param(data)
-            if group_param not in self.node_set[self.node_data[index]['model']]:
-                self.node_set[self.node_data[index]['model']][group_param] = len(self.node_set[self.node_data[index]['model']])
-            if self.node_set[self.node_data[index]['model']][group_param] == 0:
-                group_name = f"{self.node_data[index]['model']}"
-            else:
-                group_name = f"{self.node_data[index]['model']}_{self.node_set[self.node_data[index]['model']][group_param]}"
-            self.node_data[index]['group_name'] = group_name
-            self.group_count.update([group_name])
-            self.local_index[index] = self.group_count[group_name] - 1
-            if self.has_input and data['model'] in input_targets:
-                source_index = self.node_index[self.input_model[input_source[data['model']]]['name']]
-                edge_model = self.input_model[input_source[data['model']]]['edge']
+            # Go through input data
+            for name, value in self.input_data.items():
+                index = self.node_index[name]
+                target_model = self.node_data[index]['model']
+                source_model = stream_source[target_model]
+                source_index = self.node_index[self.input_spec[source_model]['name']]
+                edge_model = self.input_spec[source_model]['edge']
                 model_name = {'model': edge_model}
-                default_states = {key: item['default'] for key, item in self.model_registry[edge_model]['state'].items()}
+                default_states = {key: item['default']
+                                  for key, item in self.model_registry[edge_model]['state'].items()}
                 self.edge_data[index][source_index] = {**model_name, **default_states}
                 self.edge_data[source_index][index] = None
-                self.edge_set[(self.edge_data[index][source_index]['model'], self.node_data[source_index]['group_name'], self.node_data[index]['group_name'])][None] = 0
-                edge_name = f"{self.edge_data[index][source_index]['model']}_{self.node_data[source_index]['group_name']}_{self.node_data[index]['group_name']}"
+                self.edge_groups[(edge_model, source_model, target_model)][tuple()] = 0
+                edge_name = f"{edge_model}_{source_model}_{target_model}"
                 self.edge_data[index][source_index]['group_name'] = edge_name
-                self.spike_input[index] = data['times']
-
-        # Remove the input model (IN) if counts are zero
-        if self.group_count['IN'] == 0:
-            del self.group_count['IN']
-
-        # Get the model insertion order of our counter, and organize node map by group
-        self.group_index = {key: index for index, key in enumerate(self.group_count.keys())}
-        self.group_sorted_count = [self.group_count[group] for group in self.group_index]
-        self.group_offset = [0] + [sum(self.group_sorted_count[:i+1]) for i in range(len(self.group_sorted_count))]
-        self.node_map = {key: self.group_offset[self.group_index[self.node_data[n]['group_name']]] + self.local_index[n]
-                         for key, n in self.node_index.items()}
+                self.stream_input[index] = value
         
-        # Edges (to semi-undirected format)
-        for source, target, data in stacs_network.edges(data=True):
-            s = self.node_index[source]
-            t = self.node_index[target]
-            self.edge_data[t][s] = self.rekey_model(data)
-            edge_tuple = (self.edge_data[t][s]['model'], self.node_data[s]['group_name'], self.node_data[t]['group_name'])
-            group_param = self.rekey_param(data)
-            if group_param not in self.edge_set[edge_tuple]:
-                self.edge_set[edge_tuple][group_param] = len(self.edge_set[edge_tuple])
-            edge_name = f"{self.edge_data[t][s]['model']}_{self.node_data[s]['group_name']}_{self.node_data[t]['group_name']}"
-            if self.edge_set[edge_tuple][group_param] == 0:
-                group_name = edge_name
-            else:
-                group_name = f"{edge_name}__{self.edge_set[edge_tuple][group_param]}"
-            self.edge_data[t][s]['group_name'] = group_name
-            if t not in self.edge_data[s]:
-                self.edge_data[s][t] = None
+        # Update edges (to semi-undirected format)
+        for t, sources in enumerate(self.edge_data):
+            for s in sources.keys():
+                if t not in self.edge_data[s]:
+                    self.edge_data[s][t] = None
         
         # Sort edges
         for n in range(self.num_nodes):
             self.edge_data[n] = dict(sorted(self.edge_data[n].items()))
             self.num_edges += len(self.edge_data[n])
-    
+
     # Create the network directory for the dCSR files, and write the YAML files
     def write_yaml(self):
         # Returns a substrate model dictionary
         def substrate_model(model_name, model_type, params=None, states=None, ports=None):
             # Initialize model dictionary
             model_dict = dict()
-            model_dict['type'] = self.model_registry[model_type]['graph_type']
+            if self.model_registry[model_type]['graph_type'] in ('input', 'node'):
+                model_dict['type'] = 'vertex'
+            else:
+                model_dict['type'] = self.model_registry[model_type]['graph_type']
             model_dict['modname'] = model_name
             model_dict['modtype'] = self.model_registry[model_type]['model_type']
-            
+
             # Parameters (shared by model instances)
             if params is not None:
                 model_dict['param'] = list()
                 for k,v in params.items():
                     model_dict['param'].append({'name': k, 'value': v})
-            
+
             # States (mutable or unique per model instance)
             if states is not None:
                 model_dict['state'] = list()
@@ -267,16 +200,16 @@ class SimSTACS:
                         model_dict['state'].append({'name': k, **v})
                     else:
                         model_dict['state'].append({'name': k, 'init': 'constant', 'value': v})
-            
+
             # Ports (for external communication)
             if ports is not None:
                 model_dict['port'] = list()
                 for k,v in ports.items():
                     model_dict['port'].append({'name': k, 'value': v})
-            
+
             # Return the model dictionary
             return model_dict
-        
+
         # Returns a graph model dictionary
         def graph_vertex(model_name, order, shape=None):
             # Initialize model dictionary
@@ -284,27 +217,27 @@ class SimSTACS:
             model_dict['type'] = 'vertex'
             model_dict['modname'] = model_name
             model_dict['order'] = order
-        
+
             # Populations have a shape
             if shape is not None:
                 model_dict.update(shape)
             else:
                 model_dict.update({'shape': 'point'})
             model_dict['coord'] = [0.0, 0.0, 0.0]
-            
+
             # Return the model dictionary
             return model_dict
-        
+
         def graph_stream(model_name):
             # Initialize model dictionary
             model_dict = dict()
             model_dict['type'] = 'stream'
             model_dict['modname'] = model_name
             model_dict['coord'] = [0.0, 0.0, 0.0]
-            
+
             # Return the model dictionary
             return model_dict
-        
+
         def graph_edge(source, target, model_name, distance=None, connect=None, cutoff=None):
             # Initialize model dictionary
             model_dict = dict()
@@ -312,13 +245,13 @@ class SimSTACS:
             model_dict['source'] = source
             model_dict['target'] = [target]
             model_dict['modname'] = model_name
-        
+
             # Distance computation (default is euclidean)
             if distance is not None:
                 for k,v in distance.items():
                     model_dict['dist'] = k
                     model_dict.update(v)
-            
+
             # Connection parameterization
             model_dict['connect'] = list()
             if connect is not None:
@@ -327,33 +260,33 @@ class SimSTACS:
                         model_dict['connect'].append({'type': k, **v})
             else:
                 model_dict['connect'].append({'type': 'uniform', 'prob': 0.0})
-            
+
             # Connection cutoff distances
             if cutoff is not None:
                 model_dict['cutoff'] = cutoff
             else:
                 model_dict['cutoff'] = 0.0
-                
+
             # Return the model dictionary
             return model_dict
-        
+
         # Reorganize the list of model dictionaries
         def generate_model_yaml(substrate_models):
             # Reorder models in stream, vertex, edge order
             sort_key = {'record': -1, 'stream': 0, 'vertex': 1, 'edge': 2}
             substrate_list = sorted(substrate_models,
                                     key = lambda x: sort_key[x['type']])
-            
+
             # Return model dictionary list
             return substrate_list
-        
+
         # Collect the different graph models into a combined dictionary
         def generate_graph_yaml(graph_models):
             graph_dict = dict()
             graph_dict['stream'] = list()
             graph_dict['vertex'] = list()
             graph_dict['edge'] = list()
-        
+
             # Add to collection and remove 'type'
             for model in graph_models:
                 if model['type'] == 'stream':
@@ -362,14 +295,14 @@ class SimSTACS:
                     graph_dict['vertex'].append(model)
                 if model['type'] == 'edge':
                     graph_dict['edge'].append(model)
-                    
+
             # Return model dictionary
             return graph_dict
-        
+
         # Returns a simulation configuration
         def generate_conf_yaml(sim_conf, part_conf, time_conf):
             conf_dict = dict()
-        
+
             # General simulation information
             conf_dict.update(sim_conf)
             conf_dict.setdefault('runmode', 'simulate')
@@ -377,14 +310,14 @@ class SimSTACS:
             conf_dict.setdefault('episodic', False)
             conf_dict.setdefault('loadbal', False)
             conf_dict.setdefault('selfconn', True)
-        
+
             # Network partitions
             conf_dict.update(part_conf)
             conf_dict.setdefault('recordir', 'record')
             conf_dict.setdefault('groupdir', 'group')
             conf_dict.setdefault('fileload', '')
             conf_dict.setdefault('filesave', '.out')
-        
+
             # Simulation timing
             conf_dict.update(time_conf)
             conf_dict.setdefault('tstep', 1.0)
@@ -393,29 +326,29 @@ class SimSTACS:
             conf_dict.setdefault('trecord', 10000.0)
             conf_dict.setdefault('tsave', 1000000.0)
             conf_dict.setdefault('tbalance', 1000000.0)
-        
+
             # Return model dictionary
             return conf_dict
-    
+
         # Create directory for simulation
         os.makedirs(self.netwkdir, exist_ok=True)
         os.makedirs(f"{self.netwkdir}/files", exist_ok=True)
         os.makedirs(f"{self.netwkdir}/input", exist_ok=True)
         os.makedirs(f"{self.netwkdir}/record", exist_ok=True)
-        
+
         # Neuron and synapse dynamics are written in C++
         # but are parameterized through a YAML configuration file
         substrate_models = []
 
         # Recording information
-        if self.record_dict:
+        if self.record_spec:
             record_dict = {'type': 'record',
-                           'events': self.record_dict['events'],
+                           'events': self.record_spec['events'],
                            'probes': []}
             # duplicate probe information for model variations
-            for probe in self.record_dict['probes']:
+            for probe in self.record_spec['probes']:
                 # Check across nodes
-                for name, groups in self.node_set.items():
+                for name, groups in self.node_groups.items():
                     if probe['name'] == name:
                         for group, g in groups.items():
                             if g == 0:
@@ -430,7 +363,7 @@ class SimSTACS:
                                           'state': probe['state']}
                             record_dict['probes'].append(probe_dict)
                 # Check across edges
-                for (name, source, target), groups in self.edge_set.items():
+                for (name, source, target), groups in self.edge_groups.items():
                     if probe['name'] == name:
                         full_name = f"{name}_{source}_{target}"
                         for group, g in groups.items():
@@ -443,23 +376,23 @@ class SimSTACS:
                                           'state': probe['state']}
                             record_dict['probes'].append(probe_dict)
             substrate_models.append(record_dict)
-        
+
         # Stream models
-        if self.has_input:
-            for name, value in self.input_model.items():
+        if self.input_data:
+            for name, value in self.input_spec.items():
                 stream_param = {'n': self.group_count[value['target']]}
-                stream_port = {'input': self.input_model[name]['port']}
+                stream_port = {'input': self.input_spec[name]['port']}
                 substrate_models.append(substrate_model(name, name, params=stream_param, ports=stream_port))
                 # Write the input files too
                 input_list = []
-                for times in self.spike_input.values():
+                for times in self.stream_input.values():
                     input_list.append([float(t) for t in times])
-                fname = f"{self.netwkdir}/{self.input_model[name]['port']}"
+                fname = f"{self.netwkdir}/{self.input_spec[name]['port']}"
                 with open(fname,"w") as file:
                     yaml.dump({'spike_list': input_list}, file, sort_keys=False)
 
         # Vertex models
-        for name, groups in self.node_set.items():
+        for name, groups in self.node_groups.items():
             model_params = dict()
             model_states = dict()
             for group, g in groups.items():
@@ -480,7 +413,7 @@ class SimSTACS:
                 substrate_models.append(substrate_model(group_name, name, params=model_params, states=model_states))
 
         # Edge models
-        for (name, source, target), groups in self.edge_set.items():
+        for (name, source, target), groups in self.edge_groups.items():
             full_name = f"{name}_{source}_{target}"
             model_params = dict()
             model_states = dict()
@@ -504,20 +437,20 @@ class SimSTACS:
         # Network structure is parallelized through Charm++
         # and is also parameterized through a YAML configuration file
         graph_models = []
-        
+
         # Create the different network populations
-        if self.has_input:
-            for name, value in self.input_model.items():
+        if self.input_data:
+            for name, value in self.input_spec.items():
                 graph_models.append(graph_stream(name))
-        
+
         # Populations are using the same name as the model name
         for name, count in self.group_count.items():
-            if name in self.input_model:
+            if name in self.input_spec:
                 continue
             graph_models.append(graph_vertex(name, count))
-        
+
         # Create the different network connections
-        for (edge_name, source_name, target_name), groups in self.edge_set.items():
+        for (edge_name, source_name, target_name), groups in self.edge_groups.items():
             full_name = f"{edge_name}_{source_name}_{target_name}"
             for group, g in groups.items():
                 if g == 0:
@@ -526,7 +459,7 @@ class SimSTACS:
                     group_name = f"{full_name}__{g}"
                 model_conn = {'file': {'filetype': 'csv-sparse', 'filename': f"files/{group_name}_delay.csv"}}
                 graph_models.append(graph_edge(source_name, target_name, group_name, connect=model_conn))
-            
+
         # Generate the model file
         fname = f"{self.netwkdir}/{self.filebase}.model"
         with open(fname,"w") as file:
@@ -541,18 +474,22 @@ class SimSTACS:
             graph_yaml = generate_graph_yaml(graph_models)
             yaml.dump(graph_yaml, file, sort_keys=False)
 
-        # Partitions
-        part_conf = {'netwkdir': self.netwkdir,
-                     'recordir': self.recordir,
-                     'filebase': self.filebase,
-                     'fileload': self.file_ext,
-                     'netfiles': self.netfiles,
-                     'netparts': self.netparts}
-        
+        # Update configurations
+        self.sim_conf['runmode']   = self.runmode
+        self.sim_conf['randseed']  = self.randseed
+        self.part_conf['netwkdir'] = self.netwkdir
+        self.part_conf['filebase'] = self.filebase
+        self.part_conf['fileload'] = self.file_ext
+        self.part_conf['recordir'] = self.recordir
+        self.part_conf['netfiles'] = self.netfiles
+        self.part_conf['netparts'] = self.netparts
+        self.time_conf['tmax']     = self.timesteps
+        self.time_conf['tstep']    = self.tstep
+
         # Generate the simulation configuration file
         fname = f"{self.netwkdir}/{self.filebase}.yml"
         with open(fname,"w") as file:
-            conf_yaml = generate_conf_yaml(self.sim_conf, part_conf, self.time_conf)
+            conf_yaml = generate_conf_yaml(self.sim_conf, self.part_conf, self.time_conf)
             yaml.dump(conf_yaml, file, sort_keys=False)
 
     # Write the topology out to dCSR
@@ -570,7 +507,7 @@ class SimSTACS:
                 num_part[fileidx] = part_div
                 part_prefix[fileidx] = fileidx * part_div + part_rem
         part_prefix[self.netfiles] = self.netparts
-        
+
         # Nodes to parts bookkeeping
         node_div = self.num_nodes // self.netparts
         node_rem = self.num_nodes % self.netparts
@@ -584,19 +521,24 @@ class SimSTACS:
                 node_part[partidx] = node_div
                 node_prefix[partidx] = partidx * node_div + node_rem
         node_prefix[self.netparts] = self.num_nodes
-        
+
         # Adjcy
+        if self.debug:
+            print("Adjcy information")
         for fileidx in range(self.netfiles):
             fname = f"{self.netwkdir}/{self.filebase}.adjcy.{fileidx}"
             with open(fname,"w") as file:
                 for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
-                    #print(' ' + ' '.join(str(key) for key in self.edge_data[n]))
+                    if self.debug:
+                        print(' ' + ' '.join(str(key) for key in self.edge_data[n]))
                     if self.edge_data[n]:
                         file.write(' ' + ' '.join(str(key) for key in self.edge_data[n]) + '\n')
                     else:
                         file.write('\n')
-    
+
         # State
+        if self.debug:
+            print("State information")
         edge_prefix = [0 for _ in range(self.netparts + 1)]
         state_prefix = [0 for _ in range(self.netparts + 1)]
         stick_prefix = [0 for _ in range(self.netparts + 1)]
@@ -610,7 +552,6 @@ class SimSTACS:
                     for target in range(node_prefix[partidx], node_prefix[partidx+1]):
                         info = []
                         # nodes
-                        #info.append(self.node_data[target]['model'])
                         info.append(self.node_data[target]['group_name'])
                         state_info = []
                         stick_info = []
@@ -628,7 +569,6 @@ class SimSTACS:
                             if value is None:
                                 info.append('none')
                             else:
-                                #info.append(f"{value['model']}_{self.node_data[source]['model']}_{self.node_data[target]['model']}")
                                 info.append(f"{value['group_name']}")
                                 # states then sticks
                                 state_info = []
@@ -641,61 +581,74 @@ class SimSTACS:
                                         state_info.append(str(value[key]))
                                         state_prefix[partidx+1] += 1
                                 info.extend(state_info + stick_info)
-                        #print(' ' + ' '.join(info))
+                        if self.debug:
+                            print(' ' + ' '.join(info))
                         file.write(' ' + ' '.join(info) + '\n')
-    
+
         # Index
+        if self.debug:
+            print("Index information")
         for fileidx in range(self.netfiles):
             fname = f"{self.netwkdir}/{self.filebase}.index.{fileidx}"
             with open(fname,"w") as file:
                 for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
-                    # print(' ' + ' '.join(str(index) for index in [n, self.group_index[self.node_data[n]['model']],
-                    #                                               self.local_index[n]]))
-                    file.write(' ' + ' '.join(str(index) for index in [n, self.group_index[self.node_data[n]['group_name']],
-                                                                       self.local_index[n]]) + '\n')
-            
+                    if self.debug:
+                        print(' ' + ' '.join(
+                            str(index) for index in [n, self.group_index[self.node_data[n]['group_name']],
+                                                     self.local_index[n]]))
+                    file.write(' ' + ' '.join(
+                        str(index) for index in [n, self.group_index[self.node_data[n]['group_name']],
+                                                 self.local_index[n]]) + '\n')
+
         # Coord
+        if self.debug:
+            print("Coord information")
         for fileidx in range(self.netfiles):
             fname = f"{self.netwkdir}/{self.filebase}.coord.{fileidx}"
             with open(fname,"w") as file:
                 for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
-                    # print(' ' + ' '.join(str(0.0) for _ in range(3)))
-                    # file.write(' ' + ' '.join(str(0.0) for _ in range(3)) + '\n')
                     xyz = [self.node_data[n].get('x', 0.0),
                            self.node_data[n].get('y', 0.0),
                            self.node_data[n].get('z', 0.0)]
+                    if self.debug:
+                        print(' ' + ' '.join(str(c) for c in xyz))
                     file.write(' ' + ' '.join(str(c) for c in xyz) + '\n')
-            
+
         # Event
         for fileidx in range(self.netfiles):
             fname = f"{self.netwkdir}/{self.filebase}.event.{fileidx}"
             with open(fname,"w") as file:
                 for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
-                    # print(' 0')
                     file.write(' 0')
 
         # Dist
+        if self.debug:
+            print("Dist information")
         fname = f"{self.netwkdir}/{self.filebase}.dist"
         with open(fname,"w") as file:
             for partidx in range(self.netparts + 1):
-                # print(' '.join(str(num) for num in [node_prefix[partidx], edge_prefix[partidx],
-                #                                     state_prefix[partidx], stick_prefix[partidx], 0]))
+                if self.debug:
+                    print(' '.join(str(num) for num in [node_prefix[partidx], edge_prefix[partidx],
+                                                        state_prefix[partidx], stick_prefix[partidx], 0]))
                 file.write(' '.join(str(num) for num in [node_prefix[partidx], edge_prefix[partidx],
                                                          state_prefix[partidx], stick_prefix[partidx], 0]) + '\n')
 
         # Metis
+        if self.debug:
+            print("Metis information")
         fname = f"{self.netwkdir}/{self.filebase}.metis"
         with open(fname,"w") as file:
             for fileidx in range(self.netfiles + 1):
-                # print(' '.join(str(num) for num in [node_prefix[part_prefix[fileidx]],
-                #                                     edge_prefix[part_prefix[fileidx]]))
+                if self.debug:
+                    print(' '.join(str(num) for num in [node_prefix[part_prefix[fileidx]],
+                                                        edge_prefix[part_prefix[fileidx]]]))
                 file.write(' '.join(str(num) for num in [node_prefix[part_prefix[fileidx]],
                                                          edge_prefix[part_prefix[fileidx]]]) + '\n')
-        
+
     # Write the topology out to input files (for building)
     def write_file(self):
         # Vertex models
-        for name, groups in self.node_set.items():
+        for name, groups in self.node_groups.items():
             filename = dict()
             file = dict()
             for group, g in groups.items():
@@ -720,7 +673,7 @@ class SimSTACS:
                                 file[key].write(f"{data[key]}\n")
 
         # Edge models
-        for (name, source, target), groups in self.edge_set.items():
+        for (name, source, target), groups in self.edge_groups.items():
             full_name = f"{name}_{source}_{target}"
             model_params = dict()
             model_states = dict()
@@ -730,8 +683,7 @@ class SimSTACS:
                 else:
                     group_name = f"{full_name}__{g}"
 
-        
-        for (edge_name, source_name, target_name), groups in self.edge_set.items():
+        for (edge_name, source_name, target_name), groups in self.edge_groups.items():
             full_name = f"{edge_name}_{source_name}_{target_name}"
             filename = dict()
             file = dict()
@@ -777,7 +729,7 @@ class SimSTACS:
     def update_param(self, model, param, value):
         param_index = list(self.model_registry[model]['param']).index(param)
         # Loop over node sets
-        for name, groups in self.node_set.items():
+        for name, groups in self.node_groups.items():
             if name == model:
                 for old_param in list(groups.keys()):
                     g = groups[old_param]
@@ -788,7 +740,7 @@ class SimSTACS:
                     if new_param != old_param:
                         del groups[old_param]
         # Loop over edge sets
-        for (edge_name, source_name, target_name), groups in self.edge_set.items():
+        for (edge_name, source_name, target_name), groups in self.edge_groups.items():
             if edge_name == model:
                 for old_param in list(groups.keys()):
                     g = groups[old_param]
@@ -805,7 +757,7 @@ class SimSTACS:
         fname = f"{self.netwkdir}/{self.filebase}.yml"
         with open(fname,"r") as file:
             conf_yaml = yaml.safe_load(file)
-        
+
         # Reading in data from event logs, which are stored
         # by recording interval in simulation iterations
         record_interval = int(conf_yaml['trecord']/conf_yaml['tstep'])
@@ -815,24 +767,12 @@ class SimSTACS:
         # Read in netfiles/netparts again (for standalone analysis)
         self.netfiles = conf_yaml['netfiles']
         self.netparts = conf_yaml['netparts']
-        
-        # Calculate some information from the graph file
-        fname = f"{self.netwkdir}/{self.filebase}.graph"
-        with open(fname,"r") as file:
-            graph_yaml = yaml.safe_load(file)
-            # Vertex population sizes
-            self.vertex_modname = []
-            self.vertex_order = []
-            # Section for streams
-            if 'stream' in graph_yaml:
-                for vertex in graph_yaml['stream']:
-                    self.vertex_modname.append(vertex['modname'])
-                    self.vertex_order.append(1)
-            # Section for vertices
-            for vertex in graph_yaml['vertex']:
-                self.vertex_modname.append(vertex['modname'])
-                self.vertex_order.append(vertex['order'])
-        self.vertex_prefix = [0] + [sum(self.vertex_order[:i+1]) for i in range(len(self.vertex_order))]
+
+        # Calculate vertex prefix from group information
+        self.vertex_modname = list(self.group_count.keys())
+        self.vertex_order = [self.group_count[g] for g in self.vertex_modname]
+        self.vertex_prefix = [0] + [sum(self.vertex_order[:i + 1])
+                                     for i in range(len(self.vertex_order))]
 
         # Because the neuron models are potentially distributed over multiple
         # partitions, we need to find the reindexing mapping for cleaner plotting
@@ -843,7 +783,7 @@ class SimSTACS:
                 for line in findex:
                     global_index, group_index, local_index = line.split()
                     self.vertex_remap[int(global_index)] = self.vertex_prefix[int(group_index)] + int(local_index)
-        
+
         # Vertex distribution information
         fname = f"{self.netwkdir}/{self.filebase}.dist"
         self.vertex_dist = []
@@ -886,7 +826,7 @@ class SimSTACS:
         # Read prereqs if not already
         if self.record_points is None:
             self.read_prereqs()
-        
+
         # Records information
         self.record_list = list()
         fname = f"{self.netwkdir}/{self.filebase}.model"
@@ -900,7 +840,7 @@ class SimSTACS:
                                                  'name': probe['modname'].split('_')[0],
                                                  'state': probe['state'],
                                                  'period': probe['tfreq']})
-        
+
         # Adjacency information for getting global indexes from edges
         adjcy = []
         for fileidx in range(self.netfiles):
@@ -909,7 +849,7 @@ class SimSTACS:
                 for line in file:
                     data = line.split()
                     adjcy.append([int(index) for index in data])
-        
+
         # Read in the records from files
         header_offset = 5
         num_records = len(self.record_list)
@@ -953,48 +893,6 @@ class SimSTACS:
                                 self.record_data[record_id][timestamp].append(float(data[header_offset+value]))
                             for value in range(num_tick):
                                 self.record_data[record_id][timestamp].append(float(int(data[header_offset+value], 16)) / self.ticks_per_ms)
-        
+
         # Return the relevant data structures
         return self.record_list, self.record_index, self.record_data
-
-    # Return spikes as event list
-    def get_spikes(self):
-        if self.spike_list is None:
-            return self.read_spikes()
-        else:
-            return self.spike_list
-
-    # Plotting as event plot
-    def plot_spikes(self, figsize=(8,6), linelengths=0.8, linewidths=1.0,
-                    color_dict={'LIF': 'C0', 'IN': 'C1'}, tick_names=False):
-        if self.spike_list is None:
-            self.read_spikes()
-            
-        # Plot the event list information
-        plt.figure(figsize=figsize)
-
-        # We can also color the rows according to population
-        if color_dict is None:
-            color_dict = {key: f"C{i%10}" for i, key in enumerate(self.vertex_modname)}
-        event_color = []
-        for index, modname in enumerate(self.vertex_modname):
-            if modname not in color_dict:
-                color_dict[modname] = f"C{len(color_dict)%10}"
-            event_color.extend([color_dict[modname]] * self.vertex_order[index])
-        # colored lines (for legend)
-        for key in color_dict.keys():
-            plt.plot(0,0,'-',color=color_dict[key],linewidth=2.0)
-        
-        # The spike raster is plotted using eventplot
-        plt.eventplot(self.spike_list, colors=event_color, lineoffsets=1,
-                      linelengths=linelengths, linewidths=linewidths)
-
-        # Tick names (may be too crowded with many neurons)
-        if tick_names:
-            plt.yticks(list(self.node_map.values()), list(self.node_map.keys()))
-        
-        plt.title('Spike Raster')
-        plt.xlabel('Time (ms)')
-        plt.ylabel('Neuron (index)')
-        plt.tight_layout()
-        plt.legend(color_dict.keys())
