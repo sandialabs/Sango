@@ -730,6 +730,36 @@ class Network:
             self._graph = self._topology.to_nx()
         return self._graph
 
+    # Return the parent/child network structure
+    # This is mostly for inspection/debugging
+    def structure(self):
+        # Network class information
+        cls = type(self)
+        class_name = cls.__name__
+        module = cls.__module__
+        net_dict = {'class': f"{module}.{class_name}"}
+
+        # User-defined construction attributes
+        params = {}
+        for key, value in vars(self).items():
+            if key.startswith('_'):
+                continue
+            if isinstance(value, (NodeGroup, EdgeGroup, NodePort, NodeList)):
+                continue
+            params[key] = value
+        net_dict['param'] = params
+
+        # Recurse into child networks
+        children = {}
+        for name, child in self._children.items():
+            if isinstance(child, list):
+                children[name] = [c.structure() for c in child]
+            elif isinstance(child, Network):
+                children[name] = child.structure()
+        if children:
+            net_dict['child'] = children
+        return net_dict
+
     # Constructing state dictionaries (pass to Topology)
     def state_dict(self, parent_path=''):
         return self._topology.state_dict(parent_path=parent_path)
