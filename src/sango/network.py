@@ -1,6 +1,8 @@
 # General Imports
 from types import SimpleNamespace
 from functools import reduce, wraps
+import warnings
+import numpy as np
 import networkx as nx
 import re
 
@@ -176,14 +178,14 @@ class Topology(SimpleNamespace):
     
     # Generate path structure (after built)
     def flatten_paths(self):
-        def _flatten_nodegroups(top, parent_path=''):
+        def flatten_nodegroups(top, parent_path=''):
             for key, value in vars(top).items():
                 if key.startswith('_'):
                     continue
                 current_path = f"{parent_path}.{key}" if parent_path else key
                 # If the value is another topwork, recurse
                 if isinstance(value, Topology):
-                    _flatten_nodegroups(value, current_path)
+                    flatten_nodegroups(value, current_path)
                 # Set path for nodegroups
                 elif isinstance(value, (NodeGroup, NodePort)):
                     value.set_path(current_path)
@@ -194,7 +196,7 @@ class Topology(SimpleNamespace):
                     for i, item in enumerate(value):
                         list_path = f"{current_path}[{i}]"
                         if isinstance(item, Topology):
-                            _flatten_nodegroups(item, list_path)
+                            flatten_nodegroups(item, list_path)
                         elif isinstance(item, (NodeGroup, NodePort)):
                             item.set_path(list_path)
                         elif isinstance(item, (NodeList, EdgeGroup)):
@@ -203,7 +205,7 @@ class Topology(SimpleNamespace):
                             print(f"error at {list_path}: cannot set path for {item}")
                 else:
                     print(f"error at {current_path}: cannot set path for {value}")
-        def _flatten_nodelists(top, parent_path=''):
+        def flatten_nodelists(top, parent_path=''):
             still_flattening = False
             for key, value in vars(top).items():
                 if key.startswith('_'):
@@ -211,7 +213,7 @@ class Topology(SimpleNamespace):
                 current_path = f"{parent_path}.{key}" if parent_path else key
                 # If the value is another topwork, recurse
                 if isinstance(value, Topology):
-                    still_flattening = _flatten_nodelists(value, current_path) or still_flattening
+                    still_flattening = flatten_nodelists(value, current_path) or still_flattening
                 # If the value is a nodelist, replace any temp paths
                 elif isinstance(value, NodeList):
                     for i, item in enumerate(value):
@@ -244,7 +246,7 @@ class Topology(SimpleNamespace):
                     for i, item in enumerate(value):
                         list_path = f"{current_path}[{i}]"
                         if isinstance(item, Topology):
-                            still_flattening = _flatten_nodelists(item, list_path) or still_flattening
+                            still_flattening = flatten_nodelists(item, list_path) or still_flattening
                         elif isinstance(item, NodeList):
                             for e, entry in enumerate(item):
                                 if isinstance(entry, TempPath):
@@ -276,14 +278,14 @@ class Topology(SimpleNamespace):
                 else:
                     print(f"error at {current_path}: cannot set path for {value}")
             return still_flattening
-        def _relink_ports(top, parent_path=''):
+        def relink_ports(top, parent_path=''):
             for key, value in vars(top).items():
                 if key.startswith('_'):
                     continue
                 current_path = f"{parent_path}.{key}" if parent_path else key
                 # If the value is another topwork, recurse
                 if isinstance(value, Topology):
-                    _relink_ports(value, current_path)
+                    relink_ports(value, current_path)
                 # If the value is a node port, update any temp paths
                 elif isinstance(value, NodePort):
                     if value.link is not None and isinstance(value.link, NodeList):
@@ -293,18 +295,18 @@ class Topology(SimpleNamespace):
                     for i, item in enumerate(value):
                         list_path = f"{current_path}[{i}]"
                         if isinstance(item, Topology):
-                            _relink_ports(item, list_path)
+                            relink_ports(item, list_path)
                         elif isinstance(item, NodePort):
                             if item.link is not None and isinstance(item.link, NodeList):
                                 item.set_link(item.link)
-        def _flatten_edgegroups(top, parent_path=''):
+        def flatten_edgegroups(top, parent_path=''):
             for key, value in vars(top).items():
                 if key.startswith('_'):
                     continue
                 current_path = f"{parent_path}.{key}" if parent_path else key
                 # If the value is another topwork, recurse
                 if isinstance(value, Topology):
-                    _flatten_edgegroups(value, current_path)
+                    flatten_edgegroups(value, current_path)
                 # If the value is an edgegroup, replace any temp paths
                 elif isinstance(value, EdgeGroup):
                     if isinstance(value.source, TempPath):
@@ -323,7 +325,7 @@ class Topology(SimpleNamespace):
                     for i, item in enumerate(value):
                         list_path = f"{current_path}[{i}]"
                         if isinstance(item, Topology):
-                            _flatten_edgegroups(item, list_path)
+                            flatten_edgegroups(item, list_path)
                         elif isinstance(item, EdgeGroup):
                             if isinstance(item.source, TempPath):
                                 item.source = top.access(item.source.path)
@@ -341,12 +343,12 @@ class Topology(SimpleNamespace):
                 else:
                     print(f"error at {current_path}: cannot set path for {value}")
         # Flattening order is important for resolution
-        _flatten_nodegroups(self) # first for node groups (and ports)
-        still_flattening = _flatten_nodelists(self)  # then for node lists
+        flatten_nodegroups(self) # first for node groups (and ports)
+        still_flattening = flatten_nodelists(self)  # then for node lists
         while(still_flattening):
-            still_flattening = _flatten_nodelists(self)
-        _relink_ports(self) # then fix any port links
-        _flatten_edgegroups(self) # finally for edge groups
+            still_flattening = flatten_nodelists(self)
+        relink_ports(self) # then fix any port links
+        flatten_edgegroups(self) # finally for edge groups
         
     # Bind node groups to ports
     def bind(self, source, target):
@@ -367,7 +369,7 @@ class Topology(SimpleNamespace):
             target.set_link(source) # by reference
 
     # Generate a networkx graph
-    def to_nx(self):
+    def to_nx(self, multi=None):
         def flatten_data(data):
             flat_data = dict()
             for key, value in data.items():
@@ -378,6 +380,35 @@ class Topology(SimpleNamespace):
                     flat_data[key] = value
             return flat_data
 
+        # Check for multi-edges
+        def has_multi_edges(top, edge_set):
+            # Recursively add edge tuples from topology to set
+            for key, value in vars(top).items():
+                if key.startswith('_'):
+                    continue
+                if isinstance(value, Topology):
+                    if has_multi_edges(value, edge_set):
+                        return True
+                elif isinstance(value, EdgeGroup):
+                    for edge in value:
+                        pair = (edge.source_name, edge.target_name)
+                        if pair in edge_set:
+                            return True
+                        edge_set.add(pair)
+                elif isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, Topology):
+                            if has_multi_edges(item, edge_set):
+                                return True
+                        elif isinstance(item, EdgeGroup):
+                            for edge in item:
+                                pair = (edge.source_name, edge.target_name)
+                                if pair in edge_set:
+                                    return True
+                                edge_set.add(pair)
+            return False
+
+        # Move data from topology to graph
         def populate(top, graph):
             for key, value in vars(top).items():
                 if key.startswith('_'):
@@ -389,7 +420,8 @@ class Topology(SimpleNamespace):
                         graph.add_node(node.name, **flatten_data(node.data))
                 elif isinstance(value, EdgeGroup):
                     for edge in value:
-                        graph.add_edge(edge.source_name, edge.target_name, **flatten_data(edge.data))
+                        graph.add_edge(edge.source_name, edge.target_name,
+                                       **flatten_data(edge.data))
                 elif isinstance(value, list):
                     for i, item in enumerate(value):
                         if isinstance(item, Topology):
@@ -399,12 +431,110 @@ class Topology(SimpleNamespace):
                                 graph.add_node(node.name, **flatten_data(node.data))
                         elif isinstance(item, EdgeGroup):
                             for edge in item:
-                                graph.add_edge(edge.source_name, edge.target_name, **flatten_data(edge.data))
+                                graph.add_edge(edge.source_name, edge.target_name,
+                                               **flatten_data(edge.data))
 
-        # launch the recursive build
-        graph = nx.DiGraph()
+        # Determine graph type
+        if multi is True:
+            use_multi = True
+        elif multi is False:
+            use_multi = False
+        elif has_multi_edges(self, set()):
+            warnings.warn(
+                "Multi/parallel edges detected in graph. "
+                "Upgrading from DiGraph to MultiDiGraph.",
+                category=UserWarning,
+                stacklevel=2)
+            use_multi = True
+        else:
+            use_multi = False
+
+        # Launch the recursive generation
+        graph = nx.MultiDiGraph() if use_multi else nx.DiGraph()
         populate(self, graph)
         return graph
+
+    # Constructing state dictionaries
+    def state_dict(self, parent_path=''):
+        sd = {}
+        # Walk through topology object
+        for key, value in vars(self).items():
+            if key.startswith('_'):
+                continue
+            current_path = f"{parent_path}.{key}" if parent_path else key
+            # Recurse on topology
+            if isinstance(value, Topology):
+                sd.update(value.state_dict(parent_path=current_path))
+            # Only collect arrays if the parameters are per-node/edge
+            elif isinstance(value, NodeGroup):
+                for param_name, arr in vars(value).items():
+                    if param_name in ('path', 'nodemodel', 'shared_params'):
+                        continue
+                    if isinstance(arr, np.ndarray) and arr.dtype.kind in ('i', 'f', 'u'):
+                        sd[f"{current_path}.{param_name}"] = arr
+            elif isinstance(value, EdgeGroup):
+                # For edge groups, additionally save the indexes
+                sd[f"{current_path}._source_index"] = np.array(value.source_index)
+                sd[f"{current_path}._target_index"] = np.array(value.target_index)
+                for param_name, arr in vars(value).items():
+                    if param_name in ('path', 'edgemodel', 'source', 'target', 'edge_map', 'shared_params'):
+                        continue
+                    if isinstance(arr, np.ndarray) and arr.dtype.kind in ('i', 'f', 'u'):
+                        sd[f"{current_path}.{param_name}"] = arr
+            # Handle lists of components
+            elif isinstance(value, list):
+                for i, item in enumerate(value):
+                    list_path = f"{current_path}[{i}]"
+                    if isinstance(item, Topology):
+                        sd.update(item.state_dict(parent_path=list_path))
+                    elif isinstance(item, NodeGroup):
+                        for param_name, arr in vars(item).items():
+                            if param_name in ('path', 'nodemodel', 'shared_params'):
+                                continue
+                            if isinstance(arr, np.ndarray) and arr.dtype.kind in ('i', 'f', 'u'):
+                                sd[f"{list_path}.{param_name}"] = arr
+                    elif isinstance(item, EdgeGroup):
+                        sd[f"{list_path}._source_index"] = np.array(item.source_index)
+                        sd[f"{list_path}._target_index"] = np.array(item.target_index)
+                        for param_name, arr in vars(item).items():
+                            if param_name in ('path', 'edgemodel', 'source', 'target', 'edge_map', 'shared_params'):
+                                continue
+                            if isinstance(arr, np.ndarray) and arr.dtype.kind in ('i', 'f', 'u'):
+                                sd[f"{list_path}.{param_name}"] = arr
+
+        return sd
+
+    # Loading state dictionaries
+    def load_state_dict(self, sd, strict=True):
+        self_sd = self.state_dict()
+        # Check for mismatches between the two sets
+        missing = set(self_sd.keys()) - set(sd.keys())
+        unexpected = set(sd.keys()) - set(self_sd.keys())
+        # Complain if there's mismatches if expecting exact match
+        if strict:
+            if missing:
+                raise KeyError(f"Missing keys in state_dict: {missing}")
+            if unexpected:
+                raise KeyError(f"Unexpected keys in state_dict: {unexpected}")
+        # Go through state dict
+        for key, arr in self_sd.items():
+            if key in sd:
+                source = np.asarray(sd[key])
+                # Error checking if arrays are different sizes
+                if arr.shape != source.shape:
+                    raise ValueError(
+                        f"Shape mismatch for '{key}': "
+                        f"expected {arr.shape}, got {source.shape}"
+                    )
+                # Error checking if edge indexes don't match
+                if key.endswith(('._source_index', '._target_index')):
+                    if not np.array_equal(arr, source):
+                        raise ValueError(
+                            f"Structure mismatch for '{key}': "
+                            f"connectivity is different than state_dict")
+                    continue
+                # Copy over numpy arrays
+                np.copyto(arr, source)
 
 # Wrapper around Topology
 # Built hierarchically around dependencies
@@ -600,13 +730,17 @@ class Network:
             self._graph = self._topology.to_nx()
         return self._graph
 
-    # Passthrough method for build
-    def build(self, generate_graph=True):
-        self.recursive_build()
+    # Constructing state dictionaries (pass to Topology)
+    def state_dict(self, parent_path=''):
+        return self._topology.state_dict(parent_path=parent_path)
 
-        # Optionally generate networkx graph
-        if generate_graph:
-            self.graph(update=True)
+    # Loading state dictionaries (pass to Topology)
+    def load_state_dict(self, sd, strict=True):
+        return self._topology.load_state_dict(sd, strict=strict)
+
+    # Passthrough method for build
+    def build(self):
+        self.recursive_build()
 
     # Incrementally and recursively build children, add bindings, resolve dependencies
     def recursive_build(self):
