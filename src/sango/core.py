@@ -263,6 +263,9 @@ class EdgeGroup(list):
             return super().__getitem__(key)
         elif isinstance(key, tuple):
             # Handle custom access using a tuple key
+            # accept (s, t) as shorthand for (s, t, 0)
+            if len(key) == 2:
+                key = (key[0], key[1], 0)
             try:
                 index = self.edge_map[key]
                 return super().__getitem__(index)
@@ -275,6 +278,9 @@ class EdgeGroup(list):
         if isinstance(key, (int, slice)):
             super().__setitem__(key, value)
         elif isinstance(key, tuple):
+            # accept (s, t) as shorthand for (s, t, 0)
+            if len(key) == 2:
+                key = (key[0], key[1], 0)
             try:
                 index = self.edge_map[key]
                 super().__setitem__(index, value)
@@ -293,12 +299,14 @@ class EdgeGroup(list):
             s, t = args
         else:
             raise TypeError(f"Edge indices must be integers or a tuple of integers")
-        if (s,t) in self.edge_map:
-            raise ValueError(f"edge '({s},{t})' already exists (no duplicates allowed)")
+        # auto-assign edge key (incrementing for parallel edges)
+        edge_key = 0
+        while (s, t, edge_key) in self.edge_map:
+            edge_key += 1
         # append new node to regular list
         index = len(self)
         super().append(Edge(s,t))
-        self.edge_map[(s,t)] = index
+        self.edge_map[(s, t, edge_key)] = index
         # append to numpy arrays (very slow...)
         for key, value in vars(self.edgemodel).items():
             if key in self.shared_params: # don't update shared params
@@ -316,14 +324,15 @@ class EdgeGroup(list):
         # edge list (from list of tuples)
         if edges is None:
             super().__init__([Edge(0,0)]) # default edge
-            self.edge_map[(0,0)] = 0
+            self.edge_map[(0, 0, 0)] = 0
         else:
             super().__init__([Edge(s,t) for s,t in edges])
+            # track next available key per (s,t) pair for auto-assignment
+            next_edge_key = dict()
             for i, (s,t) in enumerate(edges):
-                # check for duplicates
-                if (s,t) in self.edge_map:
-                    raise ValueError(f"edge '({s},{t})' already exists (no duplicates allowed)")
-                self.edge_map[(s,t)] = i
+                edge_key = next_edge_key.get((s, t), 0)
+                self.edge_map[(s, t, edge_key)] = i
+                next_edge_key[(s, t)] = edge_key + 1
             
         # instantiate model data
         for key, value in vars(self.edgemodel).items():
