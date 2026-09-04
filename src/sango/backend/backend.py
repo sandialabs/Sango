@@ -182,7 +182,7 @@ class Backend(ABC):
             s = self.node_index[source]
             t = self.node_index[target]
             rekeyed_data = self.rekey_model(data)
-            model_name = rekeyed['model']
+            model_name = rekeyed_data['model']
 
             if self.is_multigraph:
                 # Use (index, edge_key) tuples to distinguish parallel edges
