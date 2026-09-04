@@ -24,9 +24,6 @@ class SimBrian(Backend):
 
     # Set up Brian 2 simulator
     def to_backend(self, **kwargs):
-        if self.is_multigraph:
-            raise TypeError("SimBrian does not currently support multigraphs.")
-
         defaultclock.dt = self.tstep
 
         # Spike generator inputs (sorted)
@@ -80,7 +77,10 @@ class SimBrian(Backend):
 
         # Synapses
         for s in range(self.num_nodes):
-            for t, data in self.edge_data[s].items():
+            for tk, data in self.edge_data[s].items():
+                # For multigraphs, keys are (target_index, edge_key) tuples
+                # For regular digraphs, these are just the target indices
+                t = tk[0] if self.is_multigraph else tk
                 group_name = data['group_name']
                 self.synapse_connections[group_name]['i'].append(self.local_index[s])
                 self.synapse_connections[group_name]['j'].append(self.local_index[t])
