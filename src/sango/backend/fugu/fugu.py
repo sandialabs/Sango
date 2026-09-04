@@ -25,6 +25,9 @@ class SimFugu(Backend):
 
     # Compile to Fugu backends
     def to_backend(self, **kwargs):
+        if self.is_multigraph:
+            raise TypeError("SimFugu does not currently support multigraphs.")
+
         backend = kwargs.get('backend', 'snn')
         self.backend_args = kwargs.get('backend_args', {'record': 'all'})
 

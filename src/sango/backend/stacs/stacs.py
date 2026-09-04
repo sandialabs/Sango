@@ -61,6 +61,9 @@ class SimSTACS(Backend):
 
     # Convert to SNN-dCSR format
     def to_backend(self, **kwargs):
+        if self.is_multigraph:
+            raise TypeError("SimSTACS does not currently support multigraphs.")
+
         self.netparts = kwargs.get('netparts', self.netparts)
         self.netfiles = kwargs.get('netfiles', self.netfiles)
         self.netwkdir = kwargs.get('prefix', self.netwkdir)

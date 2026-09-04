@@ -21,6 +21,7 @@ class Backend(ABC):
 
         # Global graph data
         self.ref_graph = None      # Reference graph
+        self.is_multigraph = False # True if ref_graph is a MultiDiGraph
         self.edge_order = 'source' # Source-major order by default
         self.num_nodes = 0
         self.node_index = None   # {node_name: global_index}
@@ -106,6 +107,7 @@ class Backend(ABC):
         # Get reference graph from network
         self.ref_graph = self.net._topology.to_nx()
         self.num_nodes = self.ref_graph.number_of_nodes()
+        self.is_multigraph = self.ref_graph.is_multigraph()
 
         # Set up containers
         self.node_index = dict()
@@ -168,32 +170,55 @@ class Backend(ABC):
         }
 
         # Edges
-        for source, target, data in self.ref_graph.edges(data=True):
+        edge_iter = (self.ref_graph.edges(data=True, keys=True)
+                     if self.is_multigraph
+                     else self.ref_graph.edges(data=True))
+        for edge_tuple in edge_iter:
+            if self.is_multigraph:
+                source, target, edge_key, data = edge_tuple
+            else:
+                source, target, data = edge_tuple
+                edge_key = None
             s = self.node_index[source]
             t = self.node_index[target]
-            if self.edge_order == 'source':
-                self.edge_data[s][t] = self.rekey_model(data)
-                model_name = self.edge_data[s][t]['model']
-            elif self.edge_order == 'target':
-                self.edge_data[t][s] = self.rekey_model(data)
-                model_name = self.edge_data[t][s]['model']
+            rekeyed_data = self.rekey_model(data)
+            model_name = rekeyed['model']
+
+            if self.is_multigraph:
+                # Use (index, edge_key) tuples to distinguish parallel edges
+                if self.edge_order == 'source':
+                    self.edge_data[s][(t, edge_key)] = rekeyed_data
+                elif self.edge_order == 'target':
+                    self.edge_data[t][(s, edge_key)] = rekeyed_data
+            else:
+                if self.edge_order == 'source':
+                    self.edge_data[s][t] = rekeyed_data
+                elif self.edge_order == 'target':
+                    self.edge_data[t][s] = rekeyed_data
+
             param_keys, param_tuple = self.rekey_param(data)
             src_group = self.node_data[s]['group_name']
             tgt_group = self.node_data[t]['group_name']
-            edge_tuple = (model_name, src_group, tgt_group)
-            
+            group_tuple = (model_name, src_group, tgt_group)
+
             # Parameter-aware variation index
-            if param_tuple not in self.edge_groups[edge_tuple]:
-                self.edge_groups[edge_tuple][param_tuple] = len(self.edge_groups[edge_tuple])
-            variation = self.edge_groups[edge_tuple][param_tuple]
+            if param_tuple not in self.edge_groups[group_tuple]:
+                self.edge_groups[group_tuple][param_tuple] = len(self.edge_groups[group_tuple])
+            variation = self.edge_groups[group_tuple][param_tuple]
             base_name = f"{model_name}_{src_group}_{tgt_group}"
             group_name = base_name if variation == 0 else f"{base_name}__{variation}"
 
-            if self.edge_order == 'source':
-                self.edge_data[s][t]['group_name'] = group_name
-            elif self.edge_order == 'target':
-                self.edge_data[t][s]['group_name'] = group_name
-            
+            if self.is_multigraph:
+                if self.edge_order == 'source':
+                    self.edge_data[s][(t, edge_key)]['group_name'] = group_name
+                elif self.edge_order == 'target':
+                    self.edge_data[t][(s, edge_key)]['group_name'] = group_name
+            else:
+                if self.edge_order == 'source':
+                    self.edge_data[s][t]['group_name'] = group_name
+                elif self.edge_order == 'target':
+                    self.edge_data[t][s]['group_name'] = group_name
+
             # Parameter dictionary
             if group_name not in self.group_models:
                 self.group_models[group_name] = model_name
@@ -281,4 +306,3 @@ class Backend(ABC):
         plt.ylabel('Neuron (index)')
         plt.tight_layout()
         plt.legend(color_dict.keys())
-

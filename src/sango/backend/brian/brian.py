@@ -24,6 +24,9 @@ class SimBrian(Backend):
 
     # Set up Brian 2 simulator
     def to_backend(self, **kwargs):
+        if self.is_multigraph:
+            raise TypeError("SimBrian does not currently support multigraphs.")
+
         defaultclock.dt = self.tstep
 
         # Spike generator inputs (sorted)
