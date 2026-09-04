@@ -1,7 +1,8 @@
-# Serialization of topology data structure
+# Serialization of network data structures
 import sys
 import json
 import pickle
+import warnings
 import numpy as np
 from dataclasses import fields
 from pathlib import Path
@@ -327,12 +328,13 @@ def topology_from_dict(top_dict):
 
 # Check if an object looks like a state_dict: dict(str->array)
 def _is_state_dict(obj):
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            if not isinstance(k, str):
-                return False
-            if not isinstance(v, (np.ndarray, list)):
-                return False
+    if not isinstance(obj, dict) or not obj:
+        return False
+    for k, v in obj.items():
+        if not isinstance(k, str):
+            return False
+        if not isinstance(v, (np.ndarray, list)):
+            return False
     return True
 
 # Convert a state_dict to JSON (with dtypes)
@@ -353,6 +355,75 @@ def statedict_from_json(json_dict):
         sd[key] = np.asarray(value['data'], dtype=np.dtype(value['dtype']))
     return sd
 
+# Convert network information to dict
+def network_to_dict(net):
+    net_dict = {'__type__': 'Network',
+                'structure': net.structure(),
+                'topology': topology_to_dict(net._topology)}
+    return net_dict
+
+# Reconstruct a Network object from a dictionary
+def network_from_dict(net_dict):
+    # Create the Network wrapper and attach Topology objects
+    def _reconstruct_network(struct, top):
+        # Try to resolve network (sub)class name
+        module_name, cls_name = struct['class'].rsplit('.', 1)
+        mod = sys.modules.get(module_name)
+        if mod is not None:
+            cls = getattr(mod, cls_name, None)
+            if cls is None:
+                warnings.warn(
+                    f"Could not resolve network class '{struct['class']}'; "
+                    f"falling back to {Network.__name__}.",
+                    category=UserWarning,
+                    stacklevel=3)
+                cls = Network
+        # Instantiate without calling build (already built)
+        net = Network.__new__(cls)
+        # Initialize saffolding attributes from init
+        net._topology = top
+        net._built = True
+        net._graph = None
+        net._name = ''
+        net._parent = None
+        net._children = {}
+        net._bindings = {}
+        net._dependencies = {}
+        net._emptylists = {}
+        net._netlists = {}
+        # Restore user-defined instance attributes
+        for key, value in struct.get('param', {}).items():
+            object.__setattr__(net, key, value)
+        # Recurse into children
+        child_structs = struct.get('child', {})
+        for child_name, child_struct in child_structs.items():
+            # Find the corresponding sub-topology
+            sub_top = getattr(top, child_name)
+            if isinstance(child_struct, list):
+                # List of child networks
+                child_list = []
+                for i, cs in enumerate(child_struct):
+                    child_net = _reconstruct_network(cs, sub_top[i])
+                    child_net._name = f"{child_name}[{i}]"
+                    child_net._parent = net
+                    child_list.append(child_net)
+                net._children[child_name] = child_list
+            elif isinstance(child_struct, dict):
+                # Standalone child network
+                child_net = _reconstruct_network(child_struct, sub_top)
+                child_net._name = child_name
+                child_net._parent = net
+                net._children[child_name] = child_net
+        return net
+
+    # Reconstruct topology first
+    top = topology_from_dict(net_dict['topology'])
+    # Reconstruct network from structure
+    struct = net_dict['structure']
+    net = _reconstruct_network(struct, top)
+    # Return reconstructed network
+    return net
+
 # Automatically get file format from extension
 def _format_from_ext(suffix):
     format_map = {'.json': 'json',
@@ -362,9 +433,7 @@ def _format_from_ext(suffix):
     # JSON by default
     return format_map.get(suffix, 'json')
 
-# Save a Network object to disk
-# This currently just saves the underlying Topology
-# This is also able to save the Topology.state_dict
+# Save network objects to disk
 def save(obj, path, format=None, **kwargs):
     path = Path(path)
     # Guess file format if none provided
@@ -375,9 +444,7 @@ def save(obj, path, format=None, **kwargs):
     if format == 'json':
         indent = kwargs.get('indent', 2)
         if isinstance(obj, Network):
-            # Network is a light wrapper around Topology
-            obj_dict = {'__type__': 'Network'}
-            obj_dict['_topology'] = topology_to_dict(obj._topology)
+            obj_dict = network_to_dict(obj)
         elif isinstance(obj, Topology):
             obj_dict = topology_to_dict(obj)
         elif _is_state_dict(obj):
@@ -389,23 +456,13 @@ def save(obj, path, format=None, **kwargs):
             json.dump(obj_dict, file, indent=indent, default=_numpy_to_python)
     elif format == 'pickle':
         protocol = kwargs.get('protocol', pickle.HIGHEST_PROTOCOL)
-        if isinstance(obj, Network):
-            # The Network object itself has problems being pickled
-            # So we just pickle the underlying Topology
-            obj_dict = {'__type__': 'Network'}
-            obj_dict['_topology'] = obj._topology
-            with open(path, 'wb') as file:
-                pickle.dump(obj_dict, file, protocol=protocol)
-        else:
-            with open(path, 'wb') as file:
-                pickle.dump(obj, file, protocol=protocol)
+        with open(path, 'wb') as file:
+            pickle.dump(obj, file, protocol=protocol)
     else:
         raise ValueError(f"Unknown format: {format!r}. "
                          "Use 'json' or 'pickle'.")
 
-# Load a Network object from disk
-# This currently just loads the underlying Topology
-# This is also able to load the Topology.state_dict
+# Load network objects from disk
 def load(path, format=None):
     path = Path(path)
     # Guess file format if none provided
@@ -417,11 +474,7 @@ def load(path, format=None):
         with open(path, 'r') as file:
             json_dict = json.load(file)
         if json_dict.get('__type__') == 'Network':
-            # Network is a light wrapper around Topology
-            net = Network()
-            net._topology = topology_from_dict(json_dict['_topology'])
-            net._built = True
-            return net
+            return network_from_dict(json_dict)
         elif json_dict.get('__type__') == 'Topology':
             return topology_from_dict(json_dict)
         elif json_dict.get('__type__') == 'state_dict':
@@ -430,16 +483,7 @@ def load(path, format=None):
             return json_dict
     elif format == 'pickle':
         with open(path, 'rb') as file:
-            data = pickle.load(file)
-            if isinstance(data, dict) and data.get('__type__') == 'Network':
-                # The Network object itself has problems being pickled
-                # So we just use it as a light wrapper around Topology
-                net = Network()
-                net._topology = data['_topology']
-                net._built = True
-                return net
-            else:
-                return data
+            return pickle.load(file)
     else:
         raise ValueError(f"Unknown format: {format!r}. "
                          "Use 'json' or 'pickle'.")

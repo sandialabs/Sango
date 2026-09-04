@@ -601,6 +601,9 @@ class Network:
 
     # Expose the underlying Topology
     def __getattr__(self, name):
+        # Guard against access before scaffolding is set
+        if name.startswith('_'):
+            raise AttributeError(name)
         # Check if built in topology
         topo_dict = vars(self._topology)
         if name in topo_dict:
