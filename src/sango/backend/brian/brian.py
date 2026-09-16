@@ -110,13 +110,14 @@ class SimBrian(Backend):
                 self.spike_monitors[name] = SpikeMonitor(self.input_groups[name])
             # Regular neuron model group
             elif self.model_registry[name]['graph_type'] == 'neuron':
-                self.neuron_groups[name] = NeuronGroup(count, model=self.model_registry[name]['model_eqs'],
-                                                       threshold=self.model_registry[name]['threshold'],
-                                                       reset=self.model_registry[name]['reset'],
-                                                       refractory=self.model_registry[name]['refractory'],
-                                                       method=self.model_registry[name]['method'],
-                                                       events=dict(self.model_registry[name]['events']),
-                                                       namespace=self.group_params[name])
+                self.neuron_groups[name] = NeuronGroup(
+                    count, model=self.model_registry[name]['model_eqs'],
+                    threshold=self.model_registry[name].get('threshold', None),
+                    reset=self.model_registry[name].get('reset', None),
+                    refractory=self.model_registry[name].get('refractory', False),
+                    method=self.model_registry[name]['method'],
+                    events=dict(self.model_registry[name].get('events', {})),
+                    namespace=self.group_params[name])
                 # These "run regularly" methods bypass the standard Brian integration step
                 if 'run_regularly' in self.model_registry[name]:
                     for program in self.model_registry[name]['run_regularly']:
@@ -153,9 +154,10 @@ class SimBrian(Backend):
         # Recording (state monitors)
         if self.record_spec is not None:
             for name, value in self.record_spec.items():
-                group = self.neuron_groups.get(name, self.synapse_groups.get(name, None))
+                source = value.pop('source')
+                group = self.neuron_groups.get(source, self.synapse_groups.get(source, None))
                 if group is None:
-                    raise KeyError(f"group name {name} not found")
+                    raise KeyError(f"group name {source} not found")
                 self.state_monitors[name] = StateMonitor(source=group, **value)
 
         # Add all the objects to the network
