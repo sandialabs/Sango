@@ -7,7 +7,7 @@ import networkx as nx
 import re
 
 # Package Imports
-from .core import NodeGroup, EdgeGroup, NodePort, NodeList, Link
+from .core import NodeGroup, EdgeGroup, NodePort, NodeList, Node, Link
 
 # Turns a non-existing path to a string
 class TempPath:
@@ -224,10 +224,14 @@ class Topology(SimpleNamespace):
                                     still_flattening = True
                                 else:
                                     value[i] = node[0]
+                                    if not isinstance(node[0], Node):
+                                        still_flattening = True
                             elif isinstance(node, TempPath):
                                 print(f"error at {current_path}: {node.path} does not exist")
                             else:
                                 value[i] = node
+                                if not isinstance(node, Node):
+                                    still_flattening = True
                         elif isinstance(item, Link):
                             if isinstance(item.link, TempPath):
                                 # top level search
@@ -256,10 +260,14 @@ class Topology(SimpleNamespace):
                                             still_flattening = True
                                         else:
                                             item[e] = node[0]
+                                            if not isinstance(node[0], Node):
+                                                still_flattening = True
                                     elif isinstance(node, TempPath):
                                         print(f"error at {list_path}: {node.path} does not exist")
                                     else:
                                         item[e] = node
+                                        if not isinstance(node, Node):
+                                            still_flattening = True
                                 elif isinstance(entry, Link):
                                     if isinstance(entry.link, TempPath):
                                         # top level search
