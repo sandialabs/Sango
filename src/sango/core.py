@@ -45,7 +45,7 @@ class Node:
     
     def __str__(self):
         if self.name is None:
-            return 'detatched node'
+            return 'detached node'
         else:
             return f"{self.name}"
 
@@ -89,7 +89,7 @@ class Edge:
     
     def __str__(self):
         if self.source_name is None:
-            return 'detatched edge'
+            return 'detached edge'
         else:
             return f"{self.source_name} -> {self.target_name}"
 
@@ -103,7 +103,7 @@ class Link:
 
     def __str__(self):
         if self.link is None:
-            return 'detatched link'
+            return 'detached link'
         else:
             return f"{self.link}"
 
