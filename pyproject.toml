@@ -27,5 +27,20 @@ classifiers = [
 [project.urls]
 Repository = "https://github.com/sandialabs/Sango"
 
+[project.optional-dependencies]
+test = ["pytest>=7", "brian2"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+  "core: Core DSL functionality tests",
+  "network: Network build, wiring, and topology tests",
+  "serialization: Round-trip serialization tests",
+  "backend: Simulator backend (Brian 2) tests",
+  "regression: End-to-end regression tests",
+]
+
