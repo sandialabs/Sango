@@ -936,8 +936,7 @@ class Network:
                 if (self._bindings):
                     # bindings remaining after children are built should be 0
                     print("error: bindings remaining after children built")
-                else:
-                    still_building = False
+                still_building = False
             elif unbuilt_count < tobuild_count:
                 tobuild_count = unbuilt_count
                 # reset loop counter
