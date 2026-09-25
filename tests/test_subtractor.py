@@ -22,6 +22,7 @@ from sango.model import IN, LIF, PSP
 # Conditionally import Brian backend
 try:
     from sango.backend.brian.brian import SimBrian
+    import brian2
     _has_brian = True
 except ImportError:
     _has_brian = False
