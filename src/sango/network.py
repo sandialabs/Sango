@@ -431,10 +431,10 @@ class Topology(SimpleNamespace):
             # Iterator over nodes
             for i in range(len(ng)):
                 attrs = {}
-                for key in unique_keys:
-                    attrs[key] = unique_vals[key][i]
                 for key, value in shared_vals.items():
                     attrs[key] = value
+                for key in unique_keys:
+                    attrs[key] = unique_vals[key][i]
                 yield f"{path}[{i}]", attrs
 
         # Prepare list of edges for networkx
@@ -460,10 +460,10 @@ class Topology(SimpleNamespace):
             target = eg._target_name
             for i in range(len(eg)):
                 attrs = {}
-                for key in unique_keys:
-                    attrs[key] = unique_vals[key][i]
                 for key, value in shared_vals.items():
                     attrs[key] = value
+                for key in unique_keys:
+                    attrs[key] = unique_vals[key][i]
                 yield source[i], target[i], attrs 
 
         # Move data from topology to graph
