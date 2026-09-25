@@ -51,7 +51,7 @@ class TestNodePort:
         p.set_link(ng)
         assert p.link is ng
         for i, item in enumerate(p):
-            assert item.link is ng[i]
+            assert item.link == ng[i]
 
     def test_set_link_resolves_node_data(self):
         """After set_link, each Link's .link should expose the source node's data."""
@@ -73,9 +73,9 @@ class TestNodePort:
         p = NodePort(3)
         p.set_link(nl)
         assert p.link is nl
-        assert p[0].link is ng[0]
-        assert p[1].link is ng[2]
-        assert p[2].link is ng[3]
+        assert p[0].link == ng[0]
+        assert p[1].link == ng[2]
+        assert p[2].link == ng[3]
 
     def test_str_with_path_and_link(self):
         ng = NodeGroup(LIF(), 2)

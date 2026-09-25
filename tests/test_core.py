@@ -1,6 +1,6 @@
 """
 Tests for the core primitives: node/edge model dataclasses, shared-parameter
-machinery, Node, Edge, Link.
+machinery, Node (proxy), Edge (proxy), Link (proxy).
 """
 import pytest
 import numpy as np
@@ -9,47 +9,121 @@ pytestmark = pytest.mark.core
 
 from sango.model.base import LIF, PSP, IN, shared, get_shared_params
 from sango.model.base import NodeModel
-from sango.core import Node, Edge, Link
+from sango.core import Node, Edge, Link, NodeGroup, EdgeGroup, NodePort
 from dataclasses import dataclass
 
 
 # ========================================================================
-# Basic graph elements
+# Basic graph elements (proxy classes)
 # ========================================================================
 
 class TestNode:
     def test_default_creation(self):
-        n = Node()
+        n = Node()  # detached proxy (group=None)
+        assert n._group is None
         assert n.index is None
-        assert n.name is None
-        assert n.data == {}
 
     def test_getattr_missing_raises(self):
-        n = Node()
+        ng = NodeGroup(LIF(), 2)
+        n = ng[0]
         with pytest.raises(AttributeError):
-            _ = n.nonexistent
+            _ = n.missing
+
+    def test_proxy_from_group(self):
+        ng = NodeGroup(LIF(), 2)
+        n = ng[1]
+        assert isinstance(n, Node)
+        assert n.index == 1
+        assert n.data != {}  # has model keys
 
 
 class TestEdge:
     def test_default_creation(self):
-        e = Edge()
-        assert e.source_index is None
-        assert e.target_index is None
-        assert e.source_name is None
-        assert e.target_name is None
-        assert e.data == {}
+        e = Edge()  # detached proxy (group=None)
+        assert e._group is None
+        assert e._index is None
 
     def test_getattr_missing_raises(self):
-        e = Edge()
+        ng = NodeGroup(LIF(), 2)
+        eg = EdgeGroup(ng, ng, PSP(), edges=[(0, 1)])
+        e = eg[0]
         with pytest.raises(AttributeError):
             _ = e.missing
+
+    def test_proxy_from_group(self):
+        ng = NodeGroup(LIF(), 2)
+        eg = EdgeGroup(ng, ng, PSP(), edges=[(0, 1)])
+        e = eg[0]
+        assert isinstance(e, Edge)
+        assert e.source_index == 0
+        assert e.target_index == 1
+        assert e.source_name is None  # no path set yet
 
 
 class TestLink:
     def test_default_creation(self):
-        lnk = Link()
+        lnk = Link()  # detached proxy (port=None)
+        assert lnk._port is None
         assert lnk.index is None
         assert lnk.link is None
+
+    def test_proxy_from_port(self):
+        p = NodePort(2)
+        lnk = p[0]
+        assert isinstance(lnk, Link)
+        assert lnk.index == 0
+        assert lnk.link is None  # no link set yet
+
+
+# ========================================================================
+# Proxy equality and hashing
+# ========================================================================
+
+class TestProxyEquality:
+    """NodeProxy, EdgeProxy, LinkProxy __eq__ and __hash__."""
+
+    def test_node_proxy_eq(self):
+        ng = NodeGroup(LIF(), 3)
+        assert ng[0] == ng[0]
+        assert ng[0] != ng[1]
+        assert ng[0] is not ng[0]  # different objects
+
+    def test_node_proxy_hash(self):
+        ng = NodeGroup(LIF(), 3)
+        assert hash(ng[0]) == hash(ng[0])
+        s = {ng[0], ng[0], ng[1]}
+        assert len(s) == 2
+
+    def test_edge_proxy_eq(self):
+        ng = NodeGroup(LIF(), 2)
+        eg = EdgeGroup(ng, ng, PSP(), edges=[(0, 1)])
+        assert eg[0] == eg[0]
+
+    def test_edge_proxy_hash(self):
+        ng = NodeGroup(LIF(), 2)
+        eg = EdgeGroup(ng, ng, PSP(), edges=[(0, 1)])
+        assert hash(eg[0]) == hash(eg[0])
+
+    def test_link_proxy_eq(self):
+        p = NodePort(3)
+        assert p[0] == p[0]
+        assert p[0] != p[1]
+
+    def test_link_proxy_hash(self):
+        p = NodePort(3)
+        assert hash(p[0]) == hash(p[0])
+
+    def test_node_proxy_read_write(self):
+        ng = NodeGroup(LIF(), 3, voltage=[1.0, 2.0, 3.0])
+        assert ng[1].voltage == 2.0
+        ng[1].voltage = 5.0
+        assert ng[1].voltage == 5.0
+        assert ng.voltage[1] == 5.0
+
+    def test_node_proxy_hasattr_link(self):
+        ng = NodeGroup(LIF(), 2)
+        # Node proxies should NOT have a 'link' attribute
+        assert not hasattr(ng[0], 'link')
 
 
 # ========================================================================

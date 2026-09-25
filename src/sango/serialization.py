@@ -42,7 +42,7 @@ def topology_to_dict(top):
                      'path': ng.path,
                      'params': {}}
         for param_name, arr in vars(ng).items():
-            if param_name in ('path', 'nodemodel', 'shared_params'):
+            if param_name in ('path', 'nodemodel', 'shared_params', '_size'):
                 continue
             node_dict['params'][param_name] = _numpy_to_python(arr)
         return node_dict
@@ -51,13 +51,13 @@ def topology_to_dict(top):
     def _edgegroup_to_dict(eg):
         eg_dict = {'__type__': 'EdgeGroup',
                    'model': _model_to_dict(eg.edgemodel),
-                   'edges': [(int(e.source_index), int(e.target_index)) for e in eg],
+                   'edges': list(zip(eg._source_index.tolist(), eg._target_index.tolist())),
                    'source_path': eg.source.path if hasattr(eg.source, 'path') else str(eg.source),
                    'target_path': eg.target.path if hasattr(eg.target, 'path') else str(eg.target),
                    'path': eg.path,
                    'params': {}}
         for param_name, arr in vars(eg).items():
-            if param_name in ('path', 'edgemodel', 'source', 'target', 'edge_map', 'shared_params'):
+            if param_name in ('path', 'edgemodel', 'source', 'target', 'edge_map', 'shared_params', '_source_index', '_target_index', '_source_name', '_target_name'):
                 continue
             eg_dict['params'][param_name] = _numpy_to_python(arr)
         return eg_dict

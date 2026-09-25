@@ -30,15 +30,15 @@ class TestNodeList:
         nl = NodeList(small_nodegroup[:])
         assert nl.size == 3
         for i in range(3):
-            assert nl[i] is small_nodegroup[i]
+            assert nl[i] == small_nodegroup[i]
 
     def test_from_partial_slice(self, small_nodegroup):
         """NodeList from a partial slice should contain the correct subset."""
         small_nodegroup.set_path("layer")
         nl = NodeList(small_nodegroup[1:])
         assert nl.size == 2
-        assert nl[0] is small_nodegroup[1]
-        assert nl[1] is small_nodegroup[2]
+        assert nl[0] == small_nodegroup[1]
+        assert nl[1] == small_nodegroup[2]
 
     def test_set_path(self):
         nl = NodeList()

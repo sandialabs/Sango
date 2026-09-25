@@ -191,8 +191,8 @@ class TestNetworkNodeList:
         net.build()
         # The port was bound to net.src, so the resolved nodes should
         # be the same objects that back net.src[0] and net.src[3].
-        assert net.out[0] is net.src[0]
-        assert net.out[1] is net.src[3]
+        assert net.out[0] == net.src[0]
+        assert net.out[1] == net.src[3]
 
 
 # ========================================================================
@@ -264,9 +264,9 @@ class TestFlattenNodeLists:
         net.list_c = NodeList([net.list_b[0], net.list_b[1]])
         net.build()
         # list_c[0] -> list_b[0] -> list_a[0] -> layer[0]
-        assert net.list_c[0] is net.layer[0]
+        assert net.list_c[0] == net.layer[0]
         # list_c[1] -> list_b[1] -> list_a[2] -> layer[2]
-        assert net.list_c[1] is net.layer[2]
+        assert net.list_c[1] == net.layer[2]
 
     def test_four_level_chain_resolves_to_nodes(self):
         """Four levels of indirection."""
@@ -279,7 +279,7 @@ class TestFlattenNodeLists:
         net.build()
         # ld[0] -> lc[1] -> lb[1] -> la[1] -> layer[1]
         assert isinstance(net.ld[0], Node)
-        assert net.ld[0] is net.layer[1]
+        assert net.ld[0] == net.layer[1]
 
 
 # ========================================================================
@@ -304,8 +304,8 @@ class TestRelinkPorts:
         for item in port:
             assert isinstance(item, Link)
             assert isinstance(item.link, Node)
-        assert port[0].link is net.src[1]
-        assert port[1].link is net.src[3]
+        assert port[0].link == net.src[1]
+        assert port[1].link == net.src[3]
 
     def test_relink_ports_after_complex_build(self, complex_net):
         """In the complex network, the DualPort's inp_a port is linked.

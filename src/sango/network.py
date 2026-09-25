@@ -7,7 +7,7 @@ import networkx as nx
 import re
 
 # Package Imports
-from .core import NodeGroup, EdgeGroup, NodePort, NodeList, Node, Link
+from .core import NodeGroup, EdgeGroup, NodePort, NodeList, Node, Edge, Link
 
 # Turns a non-existing path to a string
 class TempPath:
@@ -38,14 +38,15 @@ class TempPath:
 
     def __dir__(self):
         net_dir = []
-        # getting dir hints for tab completion (kinda cursed)
+        # getting dir hints for tab completion
         if isinstance(self.net, Network):
             net_path = self.net.access(self.path)
-            net_dir += list(vars(net_path).keys())
-            if isinstance(net_path, Network):
-                net_dir += (list(vars(net_path._topology).keys())
-                            + list(net_path._children.keys())
-                            + list(net_path._emptylists.keys()))
+            if net_path is not None and not isinstance(net_path, TempPath):
+                net_dir += list(vars(net_path).keys())
+                if isinstance(net_path, Network):
+                    net_dir += (list(vars(net_path._topology).keys())
+                                + list(net_path._children.keys())
+                                + list(net_path._emptylists.keys()))
         return super().__dir__() + net_dir
 
 # Directory structure of network topology
@@ -378,19 +379,8 @@ class Topology(SimpleNamespace):
 
     # Generate a networkx graph
     def to_nx(self, multi=None):
-        def flatten_data(data):
-            flat_data = dict()
-            for key, value in data.items():
-                if hasattr(value, 'base'):
-                    # element of numpy array (could be more error checking)
-                    flat_data[key] = value[0]
-                else:
-                    flat_data[key] = value
-            return flat_data
-
         # Check for multi-edges
         def has_multi_edges(top, edge_set):
-            # Recursively add edge tuples from topology to set
             for key, value in vars(top).items():
                 if key.startswith('_'):
                     continue
@@ -398,23 +388,82 @@ class Topology(SimpleNamespace):
                     if has_multi_edges(value, edge_set):
                         return True
                 elif isinstance(value, EdgeGroup):
-                    for edge in value:
-                        pair = (edge.source_name, edge.target_name)
-                        if pair in edge_set:
-                            return True
-                        edge_set.add(pair)
+                    if value._source_name is not None:
+                        for i in range(len(value)):
+                            pair = (value._source_name[i], value._target_name[i])
+                            if pair in edge_set:
+                                return True
+                            edge_set.add(pair)
                 elif isinstance(value, list):
                     for item in value:
                         if isinstance(item, Topology):
                             if has_multi_edges(item, edge_set):
                                 return True
                         elif isinstance(item, EdgeGroup):
-                            for edge in item:
-                                pair = (edge.source_name, edge.target_name)
-                                if pair in edge_set:
-                                    return True
-                                edge_set.add(pair)
+                            if item._source_name is not None:
+                                for i in range(len(item)):
+                                    pair = (item._source_name[i], item._target_name[i])
+                                    if pair in edge_set:
+                                        return True
+                                    edge_set.add(pair)
             return False
+
+        # Prepare list of nodes for networkx
+        def iter_node_tuples(ng):
+            model_keys = list(vars(ng.nodemodel))
+            shared_keys = ng.shared_params
+            path = ng.path
+            # Convert numpy to python
+            unique_vals = {}
+            shared_vals = {}
+            for key in model_keys:
+                arr = ng.__dict__[key]
+                if key in shared_keys:
+                    value = arr[0]
+                    shared_vals[key] = value.item() if isinstance(value, np.generic) else value
+                elif isinstance(arr, np.ndarray) and arr.dtype.kind in ('i', 'f', 'u'):
+                    unique_vals[key] = arr.tolist()
+                else:
+                    # object arrays (e.g. lists stored per-node)
+                    unique_vals[key] = [arr[i] for i in range(len(ng))]
+            unique_keys = list(unique_vals.keys())
+            # Iterator over nodes
+            for i in range(len(ng)):
+                attrs = {}
+                for key in unique_keys:
+                    attrs[key] = unique_vals[key][i]
+                for key, value in shared_vals.items():
+                    attrs[key] = value
+                yield f"{path}[{i}]", attrs
+
+        # Prepare list of edges for networkx
+        def iter_edge_tuples(eg):
+            model_keys = list(vars(eg.edgemodel))
+            shared_keys = eg.shared_params
+            # Convert numpy to python
+            unique_vals = {}
+            shared_vals = {}
+            for key in model_keys:
+                arr = eg.__dict__[key]
+                if key in shared_keys:
+                    value = arr[0]
+                    shared_vals[key] = value.item() if isinstance(value, np.generic) else value
+                elif isinstance(arr, np.ndarray) and arr.dtype.kind in ('i', 'f', 'u'):
+                    unique_vals[key] = arr.tolist()
+                else:
+                    # object arrays (e.g. lists stored per-edge)
+                    unique_vals[key] = [arr[i] for i in range(len(eg))]
+            unique_keys = list(unique_vals.keys())
+            # Iterator over edges
+            source = eg._source_name
+            target = eg._target_name
+            for i in range(len(eg)):
+                attrs = {}
+                for key in unique_keys:
+                    attrs[key] = unique_vals[key][i]
+                for key, value in shared_vals.items():
+                    attrs[key] = value
+                yield source[i], target[i], attrs 
 
         # Move data from topology to graph
         def populate(top, graph):
@@ -424,23 +473,17 @@ class Topology(SimpleNamespace):
                 if isinstance(value, Topology):
                     populate(value, graph)
                 elif isinstance(value, NodeGroup):
-                    for node in value:
-                        graph.add_node(node.name, **flatten_data(node.data))
+                    graph.add_nodes_from(iter_node_tuples(value))
                 elif isinstance(value, EdgeGroup):
-                    for edge in value:
-                        graph.add_edge(edge.source_name, edge.target_name,
-                                       **flatten_data(edge.data))
+                    graph.add_edges_from(iter_edge_tuples(value))
                 elif isinstance(value, list):
-                    for i, item in enumerate(value):
+                    for item in value:
                         if isinstance(item, Topology):
                             populate(item, graph)
                         elif isinstance(item, NodeGroup):
-                            for node in item:
-                                graph.add_node(node.name, **flatten_data(node.data))
+                            graph.add_nodes_from(iter_node_tuples(item))
                         elif isinstance(item, EdgeGroup):
-                            for edge in item:
-                                graph.add_edge(edge.source_name, edge.target_name,
-                                               **flatten_data(edge.data))
+                            graph.add_edges_from(iter_edge_tuples(item))
 
         # Determine graph type
         if multi is True:
@@ -461,7 +504,7 @@ class Topology(SimpleNamespace):
         graph = nx.MultiDiGraph() if use_multi else nx.DiGraph()
         populate(self, graph)
         return graph
-
+        
     # Constructing state dictionaries
     def state_dict(self, parent_path=''):
         sd = {}
@@ -476,16 +519,16 @@ class Topology(SimpleNamespace):
             # Only collect arrays if the parameters are per-node/edge
             elif isinstance(value, NodeGroup):
                 for param_name, arr in vars(value).items():
-                    if param_name in ('path', 'nodemodel', 'shared_params'):
+                    if param_name in ('path', 'nodemodel', 'shared_params', '_size'):
                         continue
                     if isinstance(arr, np.ndarray) and arr.dtype.kind in ('i', 'f', 'u'):
                         sd[f"{current_path}.{param_name}"] = arr
             elif isinstance(value, EdgeGroup):
                 # For edge groups, additionally save the indexes
-                sd[f"{current_path}._source_index"] = np.array(value.source_index)
-                sd[f"{current_path}._target_index"] = np.array(value.target_index)
+                sd[f"{current_path}._source_index"] = np.asarray(value._source_index)
+                sd[f"{current_path}._target_index"] = np.asarray(value._target_index)
                 for param_name, arr in vars(value).items():
-                    if param_name in ('path', 'edgemodel', 'source', 'target', 'edge_map', 'shared_params'):
+                    if param_name in ('path', 'edgemodel', 'source', 'target', 'edge_map', 'shared_params', '_source_index', '_target_index', '_source_name', '_target_name'):
                         continue
                     if isinstance(arr, np.ndarray) and arr.dtype.kind in ('i', 'f', 'u'):
                         sd[f"{current_path}.{param_name}"] = arr
@@ -497,15 +540,15 @@ class Topology(SimpleNamespace):
                         sd.update(item.state_dict(parent_path=list_path))
                     elif isinstance(item, NodeGroup):
                         for param_name, arr in vars(item).items():
-                            if param_name in ('path', 'nodemodel', 'shared_params'):
+                            if param_name in ('path', 'nodemodel', 'shared_params', '_size'):
                                 continue
                             if isinstance(arr, np.ndarray) and arr.dtype.kind in ('i', 'f', 'u'):
                                 sd[f"{list_path}.{param_name}"] = arr
                     elif isinstance(item, EdgeGroup):
-                        sd[f"{list_path}._source_index"] = np.array(item.source_index)
-                        sd[f"{list_path}._target_index"] = np.array(item.target_index)
+                        sd[f"{list_path}._source_index"] = np.asarray(item._source_index)
+                        sd[f"{list_path}._target_index"] = np.asarray(item._target_index)
                         for param_name, arr in vars(item).items():
-                            if param_name in ('path', 'edgemodel', 'source', 'target', 'edge_map', 'shared_params'):
+                            if param_name in ('path', 'edgemodel', 'source', 'target', 'edge_map', 'shared_params', '_source_index', '_target_index', '_source_name', '_target_name'):
                                 continue
                             if isinstance(arr, np.ndarray) and arr.dtype.kind in ('i', 'f', 'u'):
                                 sd[f"{list_path}.{param_name}"] = arr
