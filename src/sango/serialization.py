@@ -11,7 +11,11 @@ from .core import NodeGroup, EdgeGroup, NodePort, NodeList, Node, Edge, Link
 from .model.base import get_shared_params
 from .network import Topology, Network
 
+
+# ========================================================================
 # Convert numpy scalars/arrays to plain Python for JSON
+# ========================================================================
+
 def _numpy_to_python(value):
     if isinstance(value, np.ndarray):
         return value.tolist()
@@ -23,7 +27,11 @@ def _numpy_to_python(value):
         return bool(value)
     return value
 
+
+# ========================================================================
 # Serialize a topology object to dictionary
+# ========================================================================
+
 def topology_to_dict(top):
     # Convert node/edge dataclass models to dicts
     def _model_to_dict(model):
@@ -127,7 +135,11 @@ def topology_to_dict(top):
     top_dict = _topology_to_dict(top)
     return top_dict
 
-# Reconstruct a Topology object from a dict
+
+# ========================================================================
+# Reconstruct a Topology object from a dictionary
+# ========================================================================
+
 def topology_from_dict(top_dict):
     # Reconstruct node/edge dataclass models from dict
     def _model_from_dict(model_dict):
@@ -326,6 +338,11 @@ def topology_from_dict(top_dict):
     # Return the fully reconstructed topology object
     return top
 
+
+# ========================================================================
+# State dictionaries
+# ========================================================================
+
 # Check if an object looks like a state_dict: dict(str->array)
 def _is_state_dict(obj):
     if not isinstance(obj, dict) or not obj:
@@ -354,6 +371,10 @@ def statedict_from_json(json_dict):
             continue
         sd[key] = np.asarray(value['data'], dtype=np.dtype(value['dtype']))
     return sd
+
+# ========================================================================
+# Network to/from dictionaries
+# ========================================================================
 
 # Convert network information to dict
 def network_to_dict(net):
@@ -423,6 +444,11 @@ def network_from_dict(net_dict):
     net = _reconstruct_network(struct, top)
     # Return reconstructed network
     return net
+
+
+# ========================================================================
+# Save and Load
+# ========================================================================
 
 # Automatically get file format from extension
 def _format_from_ext(suffix):

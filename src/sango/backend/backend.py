@@ -9,7 +9,11 @@ from abc import ABC, abstractmethod
 import numpy as np
 import matplotlib.pyplot as plt
 
+
+# ========================================================================
 # Shared base class for Sango backends
+# ========================================================================
+
 class Backend(ABC):
     def __init__(self, net, debug=False, verbose=False):
         self.net = net

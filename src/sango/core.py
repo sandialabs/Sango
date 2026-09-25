@@ -6,9 +6,10 @@ import warnings
 from .model.base import NodeModel, EdgeModel
 from .model.base import get_shared_params
 
-# ======================================================================
+
+# ========================================================================
 # Lightweight proxy classes (for network elements)
-# ======================================================================
+# ========================================================================
 
 class Node:
     """Lightweight proxy for a single node inside a NodeGroup.
@@ -240,9 +241,9 @@ class Link:
         return hash((id(self._port), self._index))
 
 
-# ======================================================================
+# ========================================================================
 # Group of instantiated nodes sharing the same model (e.g. Neurons)
-# ======================================================================
+# ========================================================================
 
 class NodeGroup:
     def __init__(self, model, size=None, **kwargs):
@@ -357,9 +358,9 @@ class NodeGroup:
         self.path = path
 
 
-# ======================================================================
+# ========================================================================
 # Group of instantiated edges between two sets of nodes (e.g. Synapses)
-# ======================================================================
+# ========================================================================
 
 class EdgeGroup:
     def __init__(self, source, target, model, edges=None, **kwargs):
@@ -550,9 +551,9 @@ class EdgeGroup:
                 raise ValueError(f"error at {self.path}: setting target path {self.target}")
 
 
-# ======================================================================
+# ========================================================================
 # Alias class pointing to set of (external) nodes (e.g. Network Inputs)
-# ======================================================================
+# ========================================================================
 
 class NodePort:
     def __init__(self, size=None):

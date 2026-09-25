@@ -10,7 +10,11 @@ import re
 from .core import NodeGroup, EdgeGroup, NodePort, NodeList, Node, Edge, Link
 from .lightgraph import LightDiGraph, LightMultiDiGraph
 
-# Turns a non-existing path to a string
+
+# ========================================================================
+# Temporary Path: turns a non-existing path to a string
+# ========================================================================
+
 class TempPath:
     def __init__(self, net, root, path):
         self.net = net
@@ -50,7 +54,13 @@ class TempPath:
                                 + list(net_path._emptylists.keys()))
         return super().__dir__() + net_dir
 
-# Directory structure of network topology
+
+# ========================================================================
+# Topology data structure (recursive SimpleNamespace)
+#
+# Directory-like structural abstractions for network components
+# ========================================================================
+
 class Topology(SimpleNamespace):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -591,8 +601,13 @@ class Topology(SimpleNamespace):
                 # Copy over numpy arrays
                 np.copyto(arr, source)
 
-# Wrapper around Topology
-# Built hierarchically around dependencies
+
+# ========================================================================
+# Network container class: wrapper around Topology data structure
+#
+# Built iteratively and hierarchically around dependencies
+# ========================================================================
+
 class Network:
     def __init__(self, parent=None):
         self._topology = Topology()
