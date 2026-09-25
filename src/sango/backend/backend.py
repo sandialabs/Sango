@@ -105,7 +105,7 @@ class Backend(ABC):
     # Graph processing (with parameter-aware grouping)
     def process_graph(self):
         # Get reference graph from network
-        self.ref_graph = self.net._topology.to_nx()
+        self.ref_graph = self.net._topology.to_nx(light=True)
         self.num_nodes = self.ref_graph.number_of_nodes()
         self.is_multigraph = self.ref_graph.is_multigraph()
 

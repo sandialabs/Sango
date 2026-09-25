@@ -8,6 +8,7 @@ import re
 
 # Package Imports
 from .core import NodeGroup, EdgeGroup, NodePort, NodeList, Node, Edge, Link
+from .lightgraph import LightDiGraph, LightMultiDiGraph
 
 # Turns a non-existing path to a string
 class TempPath:
@@ -378,7 +379,7 @@ class Topology(SimpleNamespace):
             target.set_link(source) # by reference
 
     # Generate a networkx graph
-    def to_nx(self, multi=None):
+    def to_nx(self, multi=None, light=False):
         # Check for multi-edges
         def has_multi_edges(top, edge_set):
             for key, value in vars(top).items():
@@ -409,7 +410,7 @@ class Topology(SimpleNamespace):
             return False
 
         # Prepare list of nodes for networkx
-        def iter_node_tuples(ng):
+        def nodes_for_adding(ng):
             model_keys = list(vars(ng.nodemodel))
             shared_keys = ng.shared_params
             path = ng.path
@@ -437,7 +438,7 @@ class Topology(SimpleNamespace):
                 yield f"{path}[{i}]", attrs
 
         # Prepare list of edges for networkx
-        def iter_edge_tuples(eg):
+        def edges_for_adding(eg):
             model_keys = list(vars(eg.edgemodel))
             shared_keys = eg.shared_params
             # Convert numpy to python
@@ -473,17 +474,17 @@ class Topology(SimpleNamespace):
                 if isinstance(value, Topology):
                     populate(value, graph)
                 elif isinstance(value, NodeGroup):
-                    graph.add_nodes_from(iter_node_tuples(value))
+                    graph.add_nodes_from(nodes_for_adding(value))
                 elif isinstance(value, EdgeGroup):
-                    graph.add_edges_from(iter_edge_tuples(value))
+                    graph.add_edges_from(edges_for_adding(value))
                 elif isinstance(value, list):
                     for item in value:
                         if isinstance(item, Topology):
                             populate(item, graph)
                         elif isinstance(item, NodeGroup):
-                            graph.add_nodes_from(iter_node_tuples(item))
+                            graph.add_nodes_from(nodes_for_adding(item))
                         elif isinstance(item, EdgeGroup):
-                            graph.add_edges_from(iter_edge_tuples(item))
+                            graph.add_edges_from(edges_for_adding(item))
 
         # Determine graph type
         if multi is True:
@@ -501,7 +502,10 @@ class Topology(SimpleNamespace):
             use_multi = False
 
         # Launch the recursive generation
-        graph = nx.MultiDiGraph() if use_multi else nx.DiGraph()
+        if light:
+            graph = LightMultiDiGraph() if use_multi else LightDiGraph()
+        else:
+            graph = nx.MultiDiGraph() if use_multi else nx.DiGraph()
         populate(self, graph)
         return graph
         
@@ -779,9 +783,9 @@ class Network:
             return f"{self._parent.net_path()}{self._name}."
 
     # Return a flattened networkx graph
-    def graph(self, update=False):
+    def graph(self, update=False, multi=None, light=False):
         if update or self._graph is None:
-            self._graph = self._topology.to_nx()
+            self._graph = self._topology.to_nx(multi=multi, light=light)
         return self._graph
 
     # Return the parent/child network structure

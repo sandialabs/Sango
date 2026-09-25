@@ -236,6 +236,7 @@ _FILE_ORDER = [
     "test_nodelist.py",
     "test_wiring.py",
     "test_topology.py",
+    "test_lightgraph.py",
     "test_build.py",
     "test_network.py",
     "test_integration.py",
