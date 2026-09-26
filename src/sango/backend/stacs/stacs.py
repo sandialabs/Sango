@@ -411,7 +411,7 @@ class SimStacs(Backend):
                     else:
                         model_states[key] = {'init': 'file', 'filetype': 'csv-dense',
                                              'filename': f"files/{name}_{key}.csv"}
-                    if 'rep' in item and item['rep'] == 'tick':
+                    if 'unit' in item and item['unit'] == 'tick':
                         model_states[key].update({'rep': 'tick'})
                 substrate_models.append(substrate_model(group_name, name, params=model_params, states=model_states))
 
@@ -433,7 +433,7 @@ class SimStacs(Backend):
                     else:
                         model_states[key] = {'init': 'file', 'filetype': 'csv-sparse',
                                              'filename': f"files/{group_name}_{key}.csv"}
-                    if 'rep' in item and item['rep'] == 'tick':
+                    if 'unit' in item and item['unit'] == 'tick':
                         model_states[key].update({'rep': 'tick'})
                 substrate_models.append(substrate_model(group_name, name, params=model_params, states=model_states))
 
@@ -559,7 +559,7 @@ class SimStacs(Backend):
                         state_info = []
                         stick_info = []
                         for key, value in self.model_registry[self.node_data[target]['model']]['state'].items():
-                            if 'rep' in value and value['rep'] == 'tick':
+                            if 'unit' in value and value['unit'] == 'tick':
                                 stick_info.append(f'{int(self.node_data[target][key]*self.ticks_per_ms):x}')
                                 stick_prefix[partidx+1] += 1
                             else:
@@ -577,7 +577,7 @@ class SimStacs(Backend):
                                 state_info = []
                                 stick_info = []
                                 for key, item in self.model_registry[value['model']]['state'].items():
-                                    if 'rep' in item and item['rep'] == 'tick':
+                                    if 'unit' in item and item['unit'] == 'tick':
                                         stick_info.append(f'{int(value[key]*self.ticks_per_ms):x}')
                                         stick_prefix[partidx+1] += 1
                                     else:
