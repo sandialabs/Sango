@@ -12,7 +12,7 @@ import numpy as np
 from ..backend import Backend
 
 # STACS Simulation Backend
-class SimSTACS(Backend):
+class SimStacs(Backend):
     def __init__(self, net, debug=False, verbose=False):
         super().__init__(net, debug=debug, verbose=verbose)
         self.edge_order = 'target'

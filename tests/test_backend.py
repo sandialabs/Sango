@@ -14,7 +14,7 @@ from sango.network import Network
 from .conftest import Linear, SpikeInput, build_simple_net, build_hierarchical_net
 
 # Use the STACS backend class for testing here
-from sango.backend.stacs.stacs import SimSTACS
+from sango.backend.stacs.stacs import SimStacs
 
 
 # ========================================================================
@@ -23,7 +23,7 @@ from sango.backend.stacs.stacs import SimSTACS
 
 class TestProcessGraph:
     """
-    Instantiate SimSTACS just to test the shared Backend.process_graph()
+    Instantiate SimStacs just to test the shared Backend.process_graph()
     data structures (no actual simulation).
     """
 
@@ -31,14 +31,14 @@ class TestProcessGraph:
 
     def test_node_index_populated(self):
         net = build_simple_net()
-        sim = SimSTACS(net)
+        sim = SimStacs(net)
         sim.process_graph()
         assert isinstance(sim.node_index, dict)
         assert len(sim.node_index) == net.graph().number_of_nodes()
 
     def test_node_data_populated(self):
         net = build_simple_net()
-        sim = SimSTACS(net)
+        sim = SimStacs(net)
         sim.process_graph()
         assert len(sim.node_data) == sim.num_nodes
         for d in sim.node_data:
@@ -46,7 +46,7 @@ class TestProcessGraph:
 
     def test_edge_data_populated(self):
         net = build_simple_net()
-        sim = SimSTACS(net)
+        sim = SimStacs(net)
         sim.process_graph()
         assert len(sim.edge_data) == sim.num_nodes
         total_edges = sum(len(ed) for ed in sim.edge_data)
@@ -56,14 +56,14 @@ class TestProcessGraph:
 
     def test_group_count(self):
         net = build_simple_net()
-        sim = SimSTACS(net)
+        sim = SimStacs(net)
         sim.process_graph()
         assert "IN" in sim.group_count
         assert "LIF" in sim.group_count
 
     def test_input_data_extracted(self):
         net = build_simple_net()
-        sim = SimSTACS(net)
+        sim = SimStacs(net)
         sim.process_graph()
         assert len(sim.input_data) > 0
         for times in sim.input_data.values():
@@ -72,7 +72,7 @@ class TestProcessGraph:
     def test_group_index_ordering(self):
         """Input groups should precede non-input groups."""
         net = build_simple_net()
-        sim = SimSTACS(net)
+        sim = SimStacs(net)
         sim.process_graph()
         in_idx = sim.group_index.get("IN")
         lif_idx = sim.group_index.get("LIF")
@@ -81,7 +81,7 @@ class TestProcessGraph:
 
     def test_group_offset_prefix_sum(self):
         net = build_simple_net()
-        sim = SimSTACS(net)
+        sim = SimStacs(net)
         sim.process_graph()
         for i in range(len(sim.group_total)):
             assert sim.group_offset[i + 1] == sim.group_offset[i] + sim.group_total[i]
@@ -96,7 +96,7 @@ class TestProcessGraph:
         net.e1 = EdgeGroup(net.layer, net.layer, PSP(), edges=[(0, 1), (0, 1)])
         net.e_in = EdgeGroup(net.inp, net.layer, PSP(), edges=[(0, 0)])
         net.build()
-        sim = SimSTACS(net)
+        sim = SimStacs(net)
         with pytest.warns(UserWarning, match="Multi/parallel edges detected"):
             sim.process_graph()
         assert sim.is_multigraph is True
@@ -105,7 +105,7 @@ class TestProcessGraph:
 
     def test_hierarchical_process_graph(self):
         net = build_hierarchical_net()
-        sim = SimSTACS(net)
+        sim = SimStacs(net)
         sim.process_graph()
         # 3 input + 4 ff[0] + 2 ff[1] = 9
         assert sim.num_nodes == 9
@@ -116,7 +116,7 @@ class TestProcessGraph:
         """rekey_model should replace DSL names (e.g. 'voltage') with
         backend names (e.g. 'v') and inject defaults for None-dsl entries."""
         net = build_simple_net()
-        sim = SimSTACS(net)
+        sim = SimStacs(net)
         sim.process_graph()
         lif_nodes = [d for d in sim.node_data if d["model"] == "LIF"]
         for d in lif_nodes:
@@ -133,7 +133,7 @@ class TestProcessGraph:
     def test_rekey_edge_maps_dsl_to_backend(self):
         """Edge data should have backend keys after rekeying."""
         net = build_simple_net()
-        sim = SimSTACS(net)
+        sim = SimStacs(net)
         sim.process_graph()
         # Find an edge with data
         for s_edges in sim.edge_data:
@@ -147,7 +147,7 @@ class TestProcessGraph:
     def test_rekey_param_returns_keys_and_values(self):
         """rekey_param should return (keys_tuple, values_tuple)."""
         net = build_simple_net()
-        sim = SimSTACS(net)
+        sim = SimStacs(net)
         # Use raw node data from the graph directly
         g = net.graph()
         node_name = list(g.nodes)[0]
