@@ -406,7 +406,7 @@ class SimSTACS(Backend):
                 for k, key in enumerate(self.model_registry[name]['param'].keys()):
                     model_params[key] = group[k]
                 for key, item in self.model_registry[name]['state'].items():
-                    if item['dsl'] is None:
+                    if item['mapfrom'] is None:
                         model_states[key] = {'init': 'constant', 'value': item['default']}
                     else:
                         model_states[key] = {'init': 'file', 'filetype': 'csv-dense',
@@ -428,7 +428,7 @@ class SimSTACS(Backend):
                 for k, key in enumerate(self.model_registry[name]['param'].keys()):
                     model_params[key] = group[k]
                 for key, item in self.model_registry[name]['state'].items():
-                    if item['dsl'] is None:
+                    if item['mapfrom'] is None:
                         model_states[key] = {'init': 'constant', 'value': item['default']}
                     else:
                         model_states[key] = {'init': 'file', 'filetype': 'csv-sparse',
@@ -661,7 +661,7 @@ class SimSTACS(Backend):
                     group_name = f"{name}_{g}"
                 # Filenames for each state
                 for key, item in self.model_registry[name]['state'].items():
-                    if item['dsl'] is not None:
+                    if item['mapfrom'] is not None:
                         filename[key] = f"{self.netwkdir}/files/{group_name}_{key}.csv"
                 if not filename:
                     continue
@@ -697,7 +697,7 @@ class SimSTACS(Backend):
                     group_name = f"{full_name}__{g}"
                 # Filenames for each state
                 for key, item in self.model_registry[edge_name]['state'].items():
-                    if item['dsl'] is not None:
+                    if item['mapfrom'] is not None:
                         filename[key] = f"{self.netwkdir}/files/{group_name}_{key}.csv"
                 if not filename:
                     continue

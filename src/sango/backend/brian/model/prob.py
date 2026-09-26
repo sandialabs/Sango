@@ -15,10 +15,10 @@ model_registry = {'pLIF': {'graph_type': 'neuron',
                            'run_regularly' : [{'eqs': 'v*=(1.0-v_leak)', 'when': 'resets'},
                                               {'eqs': 'v+=v_bias',       'when': 'groups'}],
                            'run_on_event'  : [{'event': 'pass_thresh', 'eqs': 'v=v_reset'}],
-                           'state': {'v':        {'dsl': 'voltage',   'default': 0.0},
-                                     'v_thresh': {'dsl': 'threshold', 'default': 1.0},
-                                     'v_reset':  {'dsl': 'reset',     'default': 0.0},
-                                     'v_bias':   {'dsl': 'bias',      'default': 0.0},
-                                     'v_leak':   {'dsl': 'leak',      'default': 1.0},
-                                     'p_spike':  {'dsl': 'prob',      'default': 1.0}}}
+                           'state': {'v':        {'mapfrom': 'voltage',   'default': 0.0},
+                                     'v_thresh': {'mapfrom': 'threshold', 'default': 1.0},
+                                     'v_reset':  {'mapfrom': 'reset',     'default': 0.0},
+                                     'v_bias':   {'mapfrom': 'bias',      'default': 0.0},
+                                     'v_leak':   {'mapfrom': 'leak',      'default': 1.0},
+                                     'p_spike':  {'mapfrom': 'prob',      'default': 1.0}}}
                  }

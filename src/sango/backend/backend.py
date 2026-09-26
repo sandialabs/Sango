@@ -87,8 +87,8 @@ class Backend(ABC):
     def rekey_model(self, data):
         model_entry = self.model_registry[data['model']]
         for key, value in model_entry.get('state', {}).items():
-            if value['dsl'] is not None:
-                data[key] = data.pop(value['dsl'])
+            if value['mapfrom'] is not None:
+                data[key] = data.pop(value['mapfrom'])
             else:
                 data[key] = value['default']
         return data
@@ -100,8 +100,8 @@ class Backend(ABC):
         param = []
         for key, value in model_entry.get('param', {}).items():
             keys.append(key)
-            if value['dsl'] is not None:
-                param.append(data.pop(value['dsl']))
+            if value['mapfrom'] is not None:
+                param.append(data.pop(value['mapfrom']))
             else:
                 param.append(value['default'])
         return tuple(keys), tuple(param)
