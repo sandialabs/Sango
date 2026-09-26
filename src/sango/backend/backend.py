@@ -62,12 +62,12 @@ class Backend(ABC):
         # Registry
         self.model_registry = self.import_registry()
 
-    # Dynamically import registry files (from registry/*.py)
+    # Dynamically import registry files (from model/*.py)
     def import_registry(self):
         registry = dict()
         # Walk from the subclass file location
         subclass_file = Path(sys.modules[type(self).__module__].__file__).resolve()
-        registry_dir = subclass_file.parent / 'registry'
+        registry_dir = subclass_file.parent / 'model'
         if not registry_dir.is_dir():
             return registry
         parent_str = str(registry_dir.parent)
