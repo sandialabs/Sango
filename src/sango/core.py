@@ -293,6 +293,8 @@ class NodeGroup:
             set_dict = {name: value}
             self.set_values(**set_dict)
         else:
+            warnings.warn(f"setting non-model attribute '{name}'",
+                          category=UserWarning, stacklevel=2)
             super().__setattr__(name, value)
 
     def __getattr__(self, name):
@@ -430,6 +432,8 @@ class EdgeGroup:
             set_dict = {name: value}
             self.set_values(**set_dict)
         else:
+            warnings.warn(f"setting non-model attribute '{name}'",
+                          category=UserWarning, stacklevel=2)
             super().__setattr__(name, value)
 
     def __getattr__(self, name):

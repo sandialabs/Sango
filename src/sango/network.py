@@ -850,7 +850,8 @@ class Network:
         # Go through any previously uninitialized lists
         for name, value in self._emptylists.items():
             if not value:
-                print(f"warning: setting empty list {self.net_path()}{name}")
+                warnings.warn(f"setting empty list '{self.net_path()}{name}'",
+                          category=UserWarning, stacklevel=2)
                 super().__setattr__(name, value)
             # all items in list should be the same type
             elif isinstance(value[0], NodePort):
