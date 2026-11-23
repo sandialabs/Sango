@@ -138,12 +138,14 @@ class SimBrian(Backend):
                 self.synapse_groups[full_name] = Synapses(self.input_groups[source],
                                                           self.neuron_groups[target],
                                                           model=self.model_registry[name]['model_eqs'],
-                                                          on_pre=self.model_registry[name]['on_pre'])
+                                                          on_pre=self.model_registry[name]['on_pre'],
+                                                          namespace=self.group_params[full_name])
             else:
                 self.synapse_groups[full_name] = Synapses(self.neuron_groups[source],
                                                           self.neuron_groups[target],
                                                           model=self.model_registry[name]['model_eqs'],
-                                                          on_pre=self.model_registry[name]['on_pre'])
+                                                          on_pre=self.model_registry[name]['on_pre'],
+                                                          namespace=self.group_params[full_name])
             # Copy over connections
             self.synapse_groups[full_name].connect(i=self.synapse_connections[full_name]['i'],
                                                    j=self.synapse_connections[full_name]['j'])
