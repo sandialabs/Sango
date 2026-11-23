@@ -107,9 +107,9 @@ class Backend(ABC):
         return tuple(keys), tuple(param)
 
     # Graph processing (with parameter-aware grouping)
-    def process_graph(self):
+    def process_graph(self, multi=None, light=True):
         # Get reference graph from network
-        self.ref_graph = self.net._topology.to_nx(light=True)
+        self.ref_graph = self.net._topology.to_nx(multi=multi, light=light)
         self.num_nodes = self.ref_graph.number_of_nodes()
         self.is_multigraph = self.ref_graph.is_multigraph()
 
@@ -233,7 +233,9 @@ class Backend(ABC):
         start_time = time.perf_counter()
         
         # Process graph structure
-        self.process_graph()
+        multi = kwargs.get("multi", None)
+        light = kwargs.get("light", True)
+        self.process_graph(multi, light)
 
         # Pass to backend compile method
         self.to_backend(**kwargs)
