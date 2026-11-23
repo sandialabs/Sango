@@ -10,6 +10,11 @@ def get_shared_params(model):
     # str-typed fields are implicitly shared parameters
     shared_set |= {k for k, v in vars(model).items() if isinstance(v, str)}
     return shared_set
+
+def get_unique_params(model):
+    shared_set = get_shared_params(model)
+    unique_set = {f.name for f in fields(model) if f.name not in shared_set}
+    return unique_set
     
 # Base model classes
 @dataclass
