@@ -622,7 +622,18 @@ class SimStacs(Backend):
             fname = f"{self.netwkdir}/{self.filebase}.event.{fileidx}"
             with open(fname,"w") as file:
                 for n in range(node_prefix[part_prefix[fileidx]], node_prefix[part_prefix[fileidx+1]]):
-                    file.write(' 0')
+                    file.write(' 0\n')
+
+        # Partition
+        for fileidx in range(self.netfiles):
+            fname = f"{self.netwkdir}/{self.filebase}.part.{fileidx}"
+            with open(fname,"w") as file:
+                for partidx in range(part_prefix[fileidx], part_prefix[fileidx+1]):
+                    for n in range(node_prefix[partidx], node_prefix[partidx+1]):
+                        part = self.node_data[n].get('part', partidx)
+                        if self.debug:
+                            print(str(part))
+                        file.write(str(part) + '\n')
 
         # Dist
         if self.debug:
